@@ -105,6 +105,7 @@ def analyze_layer_1(df_base, fs=1.0):
     sigma_10m = 600 * fs
     df_res['Smoothed (1h)'] = gaussian_filter1d(pressure_data, sigma=sigma_10m)
     df_res['dP/dt (hPa/hr)'] = gaussian_filter1d(pressure_data, sigma=sigma_10m, order=1) * (3600.0 * fs)
+    df_res['Raw dP/dt (hPa/hr)'] = np.gradient(pressure_data) * (3600.0 * fs)
     
     sigma_30m = 1800 * fs
     df_res['Smoothed (3h)'] = gaussian_filter1d(pressure_data, sigma=sigma_30m)
@@ -229,7 +230,8 @@ def analyze_layer_2(df_base, fs=1.0):
     bands = {
         'Boss (150-180m)': (1/(180*60), 1/(150*60)),
         'Mother (75-85m)': (1/(85*60), 1/(75*60)),
-        'Child (35-45m)': (1/(45*60), 1/(35*60))
+        'Child (35-45m)': (1/(45*60), 1/(35*60)),
+        'Micro (15-25m)': (1/(25*60), 1/(15*60))
     }
     
     filtered_signals = {}
@@ -244,7 +246,15 @@ def analyze_layer_2(df_base, fs=1.0):
     periods_min = (1 / freqs[valid_idx]) / 60
     power_valid = power[valid_idx]
     
-    return filtered_signals, freqs, power, periods_min, power_valid
+    # Extract exact peak period (between 10m and 300m to avoid noise)
+    mask = (periods_min >= 10) & (periods_min <= 300)
+    if mask.any():
+        peak_idx = np.argmax(power_valid[mask])
+        exact_peak_period = periods_min[mask][peak_idx]
+    else:
+        exact_peak_period = None
+    
+    return filtered_signals, freqs, power, periods_min, power_valid, exact_peak_period
 
 # --- Layer 3: Atmospheric State ---
 def permutation_entropy(time_series, m=3, delay=1):

@@ -75,6 +75,25 @@ def main():
         
         fig = px.line(plot_df, x='Datetime', y='Pressure (hPa)', title=f"Áp suất - {selected_folder} ({int(fs)}Hz Data)",
                      template="plotly_dark")
+        fig.update_xaxes(title=None)
+                     
+        # Extract Min/Max
+        idx_max = plot_df['Pressure (hPa)'].idxmax()
+        idx_min = plot_df['Pressure (hPa)'].idxmin()
+        p_max_val = plot_df.loc[idx_max, 'Pressure (hPa)']
+        t_max_val = plot_df.loc[idx_max, 'Datetime']
+        p_min_val = plot_df.loc[idx_min, 'Pressure (hPa)']
+        t_min_val = plot_df.loc[idx_min, 'Datetime']
+        
+        fig.add_scatter(x=[t_max_val], y=[p_max_val], mode='markers+text', text=[f"Pmax: {p_max_val:.2f}"], textposition="top center", marker=dict(color='#ff4b4b', size=8), showlegend=False)
+        fig.add_scatter(x=[t_min_val], y=[p_min_val], mode='markers+text', text=[f"Pmin: {p_min_val:.2f}"], textposition="bottom center", marker=dict(color='#00d4ff', size=8), showlegend=False)
+        
+        fig.add_vline(x=t_max_val, line_width=1, line_dash="dot", line_color="#ff4b4b")
+        fig.add_annotation(x=t_max_val, y=0.0, yref="paper", yanchor="bottom", text=t_max_val.strftime('%H:%M:%S'), showarrow=False, font=dict(color="#ff4b4b"), xanchor="left")
+        
+        fig.add_vline(x=t_min_val, line_width=1, line_dash="dot", line_color="#00d4ff")
+        fig.add_annotation(x=t_min_val, y=0.0, yref="paper", yanchor="bottom", text=t_min_val.strftime('%H:%M:%S'), showarrow=False, font=dict(color="#00d4ff"), xanchor="left")
+        
         st.plotly_chart(fig, use_container_width=True)
         
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -100,20 +119,62 @@ def main():
             
             # Make theoretical tide dashed for clarity
             fig1.update_traces(line=dict(dash='dash'), selector=dict(name='Theoretical Tide (Solar+Lunar)'))
+            fig1.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
+            fig1.update_xaxes(title=None)
+            
+            # Add annotations and projections
+            idx_max_l1 = df_l1['Pressure (hPa)'].idxmax()
+            idx_min_l1 = df_l1['Pressure (hPa)'].idxmin()
+            idx_max_tide = df_l1['Theoretical Tide (Solar+Lunar)'].idxmax()
+            idx_min_tide = df_l1['Theoretical Tide (Solar+Lunar)'].idxmin()
+            
+            t_max_l1 = df_l1.loc[idx_max_l1, 'Datetime']
+            p_max_l1 = df_l1.loc[idx_max_l1, 'Pressure (hPa)']
+            t_min_l1 = df_l1.loc[idx_min_l1, 'Datetime']
+            p_min_l1 = df_l1.loc[idx_min_l1, 'Pressure (hPa)']
+            
+            t_max_tide = df_l1.loc[idx_max_tide, 'Datetime']
+            p_max_tide = df_l1.loc[idx_max_tide, 'Theoretical Tide (Solar+Lunar)']
+            t_min_tide = df_l1.loc[idx_min_tide, 'Datetime']
+            p_min_tide = df_l1.loc[idx_min_tide, 'Theoretical Tide (Solar+Lunar)']
+            
+            fig1.add_scatter(x=[t_max_l1], y=[p_max_l1], mode='markers+text', text=[f"Pmax: {p_max_l1:.2f}"], textposition="top center", marker=dict(color='#ff4b4b', size=8), showlegend=False)
+            fig1.add_scatter(x=[t_min_l1], y=[p_min_l1], mode='markers+text', text=[f"Pmin: {p_min_l1:.2f}"], textposition="bottom center", marker=dict(color='#00d4ff', size=8), showlegend=False)
+            
+            fig1.add_scatter(x=[t_max_tide], y=[p_max_tide], mode='markers+text', text=[f"Tide Max: {p_max_tide:.2f}"], textposition="top center", marker=dict(color='#ffaa00', size=8), showlegend=False)
+            fig1.add_scatter(x=[t_min_tide], y=[p_min_tide], mode='markers+text', text=[f"Tide Min: {p_min_tide:.2f}"], textposition="bottom center", marker=dict(color='#ffaa00', size=8), showlegend=False)
+            
+            fig1.add_vline(x=t_max_l1, line_width=1, line_dash="dot", line_color="#ff4b4b")
+            fig1.add_annotation(x=t_max_l1, y=0.0, yref="paper", yanchor="bottom", text=t_max_l1.strftime('%H:%M:%S'), showarrow=False, font=dict(color="#ff4b4b"), xanchor="left")
+            
+            fig1.add_vline(x=t_min_l1, line_width=1, line_dash="dot", line_color="#00d4ff")
+            fig1.add_annotation(x=t_min_l1, y=0.0, yref="paper", yanchor="bottom", text=t_min_l1.strftime('%H:%M:%S'), showarrow=False, font=dict(color="#00d4ff"), xanchor="left")
+            
+            fig1.add_vline(x=t_max_tide, line_width=1, line_dash="dot", line_color="#ffaa00")
+            fig1.add_annotation(x=t_max_tide, y=0.0, yref="paper", yanchor="bottom", text=t_max_tide.strftime('%H:%M:%S'), showarrow=False, font=dict(color="#ffaa00"), xanchor="right")
+            
+            fig1.add_vline(x=t_min_tide, line_width=1, line_dash="dot", line_color="#ffaa00")
+            fig1.add_annotation(x=t_min_tide, y=0.0, yref="paper", yanchor="bottom", text=t_min_tide.strftime('%H:%M:%S'), showarrow=False, font=dict(color="#ffaa00"), xanchor="right")
+            
             st.plotly_chart(fig1, use_container_width=True)
             
-            fig2 = px.line(df_l1, x='Datetime', y='dP/dt (hPa/hr)', title="Tốc độ biến thiên (dP/dt)", template="plotly_dark")
+            fig2 = px.line(df_l1, x='Datetime', y=['Raw dP/dt (hPa/hr)', 'dP/dt (hPa/hr)'], title="Tốc độ biến thiên (dP/dt)", template="plotly_dark")
+            fig2.update_traces(opacity=0.4, selector=dict(name='Raw dP/dt (hPa/hr)'))
+            fig2.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
+            fig2.update_xaxes(title=None)
             st.plotly_chart(fig2, use_container_width=True)
             
             # --- Astronomical Features Chart ---
             fig_astro = px.line(df_l1, x='Datetime', y=['Solar Elevation (deg)', 'Moon Phase (days)'],
                                title="Thông số Thiên văn (Solar Elevation & Moon Phase)", template="plotly_dark")
+            fig_astro.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
+            fig_astro.update_xaxes(title=None)
             # Put them on secondary y-axis or just rely on plotly autoscaling
             st.plotly_chart(fig_astro, use_container_width=True)
             
         with tab2:
             st.header("2. Hệ thống Sóng (Boss/Mother/Child)")
-            filtered_signals, freqs, power, periods_min, power_valid = analyze_layer_2(df_base, fs=fs)
+            filtered_signals, freqs, power, periods_min, power_valid, exact_peak_period = analyze_layer_2(df_base, fs=fs)
             
             df_waves = df_base[['Datetime']].copy()
             for name, sig in filtered_signals.items():
@@ -121,6 +182,8 @@ def main():
                 
             fig_waves = px.line(df_waves, x='Datetime', y=list(filtered_signals.keys()), 
                                 title="Các Dải Sóng (Bandpass Filtered)", template="plotly_dark")
+            fig_waves.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
+            fig_waves.update_xaxes(title=None)
             st.plotly_chart(fig_waves, use_container_width=True)
             
             df_fft = pd.DataFrame({'Period (minutes)': periods_min, 'Power': power_valid})
@@ -131,6 +194,13 @@ def main():
             fig_fft.add_vrect(x0=150, x1=180, fillcolor="red", opacity=0.2, line_width=0, annotation_text="Boss")
             fig_fft.add_vrect(x0=75, x1=85, fillcolor="green", opacity=0.2, line_width=0, annotation_text="Mother")
             fig_fft.add_vrect(x0=35, x1=45, fillcolor="blue", opacity=0.2, line_width=0, annotation_text="Child")
+            fig_fft.add_vrect(x0=15, x1=25, fillcolor="orange", opacity=0.2, line_width=0, annotation_text="Micro")
+            
+            if exact_peak_period is not None:
+                fig_fft.add_vline(x=exact_peak_period, line_width=2, line_dash="dash", line_color="white")
+                fig_fft.add_annotation(x=exact_peak_period, y=0.95, yref="paper", text=f"Peak: {exact_peak_period:.2f}m", showarrow=True, arrowhead=2, font=dict(color="white"))
+                
+            fig_fft.update_xaxes(title=None)
             st.plotly_chart(fig_fft, use_container_width=True)
             
         with tab3:
@@ -144,9 +214,11 @@ def main():
             c3.metric("Min Permutation Entropy", f"{metrics_l3['Min Entropy']:.4f}")
             
             fig3 = px.line(df_l3, x='Datetime', y='Permutation Entropy', title="Permutation Entropy (Rolling 10m)", template="plotly_dark")
+            fig3.update_xaxes(title=None)
             st.plotly_chart(fig3, use_container_width=True)
             
             fig3b = px.line(df_l3, x='Datetime', y='Rolling Variance (10m)', title="Rolling Variance (Proxy for Turbulence)", template="plotly_dark")
+            fig3b.update_xaxes(title=None)
             st.plotly_chart(fig3b, use_container_width=True)
             
         with tab4:
@@ -162,6 +234,7 @@ def main():
             df_l4_plot = df_l4.set_index('Datetime').resample('1s').max().reset_index().dropna(subset=['Gust Proxy (Rolling Std)'])
             
             fig4 = px.line(df_l4_plot, x='Datetime', y='Gust Proxy (Rolling Std)', title="Max Gust Proxy (1s Downsampled for plotting)", template="plotly_dark")
+            fig4.update_xaxes(title=None)
             st.plotly_chart(fig4, use_container_width=True)
             
         with tab5:
@@ -171,7 +244,7 @@ def main():
             if baseline_folder != "None":
                 base_path = os.path.join(DATA_DIR, baseline_folder)
                 _, df_base_compare = get_processed_data(base_path, target_fs=fs)
-                df_l2_baseline_waves, _, _, _, _ = analyze_layer_2(df_base_compare, fs=fs)
+                df_l2_baseline_waves, _, _, _, _, _ = analyze_layer_2(df_base_compare, fs=fs)
                 # Convert dict to df for convenience
                 df_l2_baseline_waves = pd.DataFrame(df_l2_baseline_waves)
                 
