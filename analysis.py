@@ -1,0 +1,381 @@
+import os
+import itertools
+import math
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+from scipy.signal import medfilt, butter, filtfilt, sosfiltfilt, welch, savgol_filter
+from scipy.ndimage import gaussian_filter1d
+from scipy.stats import entropy
+from astral import LocationInfo
+from astral.sun import elevation
+from astral.moon import phase
+
+# --- Preprocessing & Data Loading ---
+
+def parse_system_time(time_str):
+    # Example format: "2026-02-20 21:56:34.346 UTC+07:00"
+    # We parse the part before UTC
+    try:
+        clean_str = time_str.split(" UTC")[0].strip()
+        return datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S.%f")
+    except Exception as e:
+        print(f"Error parsing time: {e}")
+        return None
+
+def load_and_preprocess_data(folder_path, target_fs=1.0):
+    """
+    Loads raw CSV data, aligns with real-world datetime,
+    applies median filter, interpolates gaps, and generates 32Hz & target resolution dataframes.
+    """
+    raw_csv = os.path.join(folder_path, "Raw Data.csv")
+    time_csv = os.path.join(folder_path, "meta", "time.csv")
+    
+    if not os.path.exists(raw_csv):
+        raise FileNotFoundError(f"Missing Raw Data.csv in {folder_path}")
+        
+    df = pd.read_csv(raw_csv)
+    
+    # Process Datetime
+    start_time = None
+    if os.path.exists(time_csv):
+        df_time = pd.read_csv(time_csv)
+        start_row = df_time[df_time['event'] == 'START']
+        if not start_row.empty:
+            start_time_text = start_row['system time text'].values[0]
+            start_time = parse_system_time(start_time_text)
+            
+    if start_time is None:
+        # Fallback to current time if time.csv is corrupted/missing
+        start_time = datetime.now()
+        
+    # Convert Time (s) to absolute Datetime
+    # Pandas timedelta accepts seconds via unit='s'
+    df['Datetime'] = start_time + pd.to_timedelta(df['Time (s)'], unit='s')
+    
+    # Ensure sorted by Datetime
+    df = df.sort_values('Datetime')
+    
+    # 1. Median Filter (Spike Removal for Goertek sensor)
+    # Apply a small window (e.g., 5 samples) median filter
+    df['Pressure (hPa)'] = medfilt(df['Pressure (hPa)'].values, kernel_size=5)
+    
+    # 2. Gap Filling (Interpolation) by creating a uniform 32Hz grid
+    # 32Hz -> ~0.03125 seconds per sample. We'll resample to exact uniform grid
+    # to avoid any missing data gaps.
+    df = df.set_index('Datetime')
+    df = df[~df.index.duplicated(keep='first')] # Remove duplicate timestamps if any
+    
+    # Create uniform index at 32Hz (using 31.25 ms. Pandas needs exact ms string)
+    # 1000/32 = 31.25ms. Let's use 31250 us (microseconds)
+    uniform_index = pd.date_range(start=df.index.min(), end=df.index.max(), freq='31250us')
+    
+    # Combine original index with uniform index to preserve data points for interpolation
+    combined_index = df.index.union(uniform_index)
+    df_combined = df.reindex(combined_index)
+    
+    # Interpolate values
+    df_combined['Pressure (hPa)'] = df_combined['Pressure (hPa)'].interpolate(method='time')
+    
+    # Extract only the uniform grid points
+    df_32hz = df_combined.reindex(uniform_index)
+    
+    # Recreate Time (s) for convenience
+    df_32hz['Time (s)'] = (df_32hz.index - df_32hz.index[0]).total_seconds()
+    
+    # Reset index for easier plotting later
+    df_32hz = df_32hz.reset_index().rename(columns={'index': 'Datetime'})
+    
+    # 3. Downsample to target freq
+    if target_fs == 32.0:
+        df_base = df_32hz.copy()
+    else:
+        freq_str = f"{int(1000/target_fs)}ms"
+        df_base = df_32hz.set_index('Datetime').resample(freq_str).mean().reset_index()
+    
+    return df_32hz, df_base
+
+# --- Layer 1: Synoptic & Tidal ---
+def analyze_layer_1(df_base, fs=1.0):
+    df_res = df_base.copy()
+    
+    # 1. We use Gaussian Filter for mathematically smooth low-pass filtering and derivatives.
+    pressure_data = df_res['Pressure (hPa)'].interpolate(method='linear').fillna(method='bfill').fillna(method='ffill').values
+    
+    sigma_10m = 600 * fs
+    df_res['Smoothed (1h)'] = gaussian_filter1d(pressure_data, sigma=sigma_10m)
+    df_res['dP/dt (hPa/hr)'] = gaussian_filter1d(pressure_data, sigma=sigma_10m, order=1) * (3600.0 * fs)
+    
+    sigma_30m = 1800 * fs
+    df_res['Smoothed (3h)'] = gaussian_filter1d(pressure_data, sigma=sigma_30m)
+    
+    # Linear trend over entire period
+    x = np.arange(len(df_res))
+    slope, intercept = np.polyfit(x, pressure_data, 1)
+    df_res['Linear Trend'] = slope * x + intercept
+    
+    # 2. Astronomical Tides (Solar & Lunar)
+    # Vietnam Location: Latitude ~10.76 (HCMC/Tan An), Longitude ~106.66
+    loc = LocationInfo("Vietnam", "Vietnam", "Asia/Ho_Chi_Minh", 10.7626, 106.6601)
+    
+    theoretical_tides = []
+    solar_elevations = []
+    moon_phases = []
+    
+    # S1 (diurnal solar), S2 (semidiurnal solar), M2 (semidiurnal lunar)
+    # Amplitudes are approximate for tropical latitudes (in hPa)
+    amp_s1 = 0.5   
+    amp_s2 = 1.2   
+    amp_m2 = 0.1   
+    
+    for dt in df_res['Datetime']:
+        # tz-aware datetime required by astral
+        dt_aware = dt.tz_localize('Asia/Ho_Chi_Minh') if dt.tzinfo is None else dt
+        
+        # Solar elevation (degrees) -> controls S1, S2 heating cycle
+        sol_elev = elevation(loc.observer, dt_aware)
+        solar_elevations.append(sol_elev)
+        
+        # Moon phase (0-27.9 days)
+        m_phase = phase(dt_aware)
+        moon_phases.append(m_phase)
+        
+        # Time variables in days for harmonic formulas
+        t_hours = dt_aware.hour + dt_aware.minute / 60.0 + dt_aware.second / 3600.0
+        
+        # S2 wave peaks roughly at 10 AM and 10 PM local time
+        tide_s2 = amp_s2 * np.cos(2 * np.pi * (t_hours - 10) / 12)
+        # S1 wave peaks roughly at 5 AM (minimum temperature)
+        tide_s1 = amp_s1 * np.cos(2 * np.pi * (t_hours - 5) / 24)
+        
+        # M2 wave follows lunar transit (approx 50 mins later each day, linked to phase)
+        # 1 lunar cycle = 29.53 days. 
+        lunar_hours = t_hours - (m_phase / 29.53) * 24
+        tide_m2 = amp_m2 * np.cos(2 * np.pi * (lunar_hours) / 12.42)
+        
+        # Total Theoretical Tide offset
+        tide_total = tide_s1 + tide_s2 + tide_m2
+        theoretical_tides.append(tide_total)
+        
+    # Standardize atmospheric tide vertically to match the intercept of the data
+    tide_array = np.array(theoretical_tides)
+    mean_pressure = np.mean(pressure_data)
+    tide_array = tide_array - np.mean(tide_array) + mean_pressure
+    
+    df_res['Theoretical Tide (Solar+Lunar)'] = tide_array
+    
+    # 3. Residual Pressure (Actual - Theoretical Tides)
+    df_res['Residual Pressure (Synoptic Only)'] = df_res['Pressure (hPa)'] - df_res['Theoretical Tide (Solar+Lunar)'] + mean_pressure
+    
+    df_res['Solar Elevation (deg)'] = solar_elevations
+    df_res['Moon Phase (days)'] = moon_phases
+    
+    metrics = {
+        'Synoptic Trend': 'Rising' if slope > 0 else 'Falling',
+        'Max dP/dt': df_res['dP/dt (hPa/hr)'].max(),
+        'Min dP/dt': df_res['dP/dt (hPa/hr)'].min(),
+        'Avg Moon Phase': np.mean(moon_phases)
+    }
+    
+    return df_res, metrics
+
+# --- Signal Processing Helpers ---
+def butter_bandpass(lowcut, highcut, fs, order=4):
+    nyq = 0.5 * fs
+    low = lowcut / nyq
+    high = highcut / nyq
+    # Clip high to 0.99 to avoid critical frequency issue if high is too close to Nyquist
+    high = min(high, 0.99)
+    # Use Second-Order Sections (SOS) for numerical stability with very low frequencies
+    sos = butter(order, [low, high], btype='band', output='sos')
+    return sos
+
+def butter_bandpass_filter(data, lowcut, highcut, fs, order=4):
+    sos = butter_bandpass(lowcut, highcut, fs, order=order)
+    # Filter the data using sosfiltfilt
+    y = sosfiltfilt(sos, data)
+    return y
+
+def compute_zero_padded_fft(data, fs, pad_factor=4):
+    """
+    Computes zero-padded FFT to increase spectral resolution and avoid leakage.
+    pad_factor=4 means the total length will be 4 times the original length.
+    """
+    n = len(data)
+    n_padded = n * pad_factor
+    # Remove mean before FFT to avoid huge DC spike
+    data_zero_mean = data - np.mean(data)
+    
+    # Apply Hann window to reduce leakage
+    window = np.hanning(n)
+    data_windowed = data_zero_mean * window
+    
+    yf = np.fft.rfft(data_windowed, n=n_padded)
+    xf = np.fft.rfftfreq(n_padded, 1/fs)
+    
+    # Power Spectrum
+    power = np.abs(yf)**2 / n
+    return xf, power
+
+# --- Layer 2: Wave Spectrum ---
+def analyze_layer_2(df_base, fs=1.0):
+    data = df_base['Pressure (hPa)'].values
+    
+    # Define Bands in Hz
+    # Boss: 150-180 min -> 9000-10800 seconds -> f = 1/T: 0.000092 Hz to 0.000111 Hz
+    # Mother: 75-85 min -> 4500-5100 seconds
+    # Child: 35-45 min -> 2100-2700 seconds
+    
+    bands = {
+        'Boss (150-180m)': (1/(180*60), 1/(150*60)),
+        'Mother (75-85m)': (1/(85*60), 1/(75*60)),
+        'Child (35-45m)': (1/(45*60), 1/(35*60))
+    }
+    
+    filtered_signals = {}
+    for name, (low, high) in bands.items():
+        filtered_signals[name] = butter_bandpass_filter(data, low, high, fs)
+        
+    # Zero-padded FFT
+    freqs, power = compute_zero_padded_fft(data, fs, pad_factor=8)
+    # Convert freq to Period in minutes for plotting
+    # Ignore 0 freq to avoid division by zero
+    valid_idx = freqs > 0
+    periods_min = (1 / freqs[valid_idx]) / 60
+    power_valid = power[valid_idx]
+    
+    return filtered_signals, freqs, power, periods_min, power_valid
+
+# --- Layer 3: Atmospheric State ---
+def permutation_entropy(time_series, m=3, delay=1):
+    """
+    Calculate the Permutation Entropy
+    m: embedding dimension
+    delay: time delay
+    """
+    n = len(time_series)
+    if n < m:
+        return np.nan
+    permutations = np.array(list(itertools.permutations(range(m))))
+    c = [0] * len(permutations)
+    
+    for i in range(n - delay * (m - 1)):
+        # Extract the ordinal pattern
+        sorted_index_array = np.argsort(time_series[i:i+delay*m:delay], kind='quicksort')
+        for j, p in enumerate(permutations):
+            if np.array_equal(sorted_index_array, p):
+                c[j] += 1
+                break
+    
+    c = [val for val in c if val != 0]
+    p = np.array(c) / sum(c)
+    pe = -sum(p * np.log2(p))
+    # Normalize by log2(m!) so it's between 0 and 1
+    return pe / np.log2(math.factorial(m))
+
+def analyze_layer_3(df_base, fs=1.0):
+    # Rolling Permutation Entropy (10 min windows = 600 seconds) to detect "quiet" vs "turbulent" states
+    df_res = df_base[['Datetime', 'Pressure (hPa)']].copy()
+    
+    # We downsample a bit before Rolling PE to save compute time (every 10s)
+    step = int(max(1, 10 * fs))
+    df_10s = df_res.iloc[::step].copy()
+    pe_values = []
+    
+    # PE is slow, so only compute every N points
+    # 60 samples represents 10 minutes when step is 10s
+    pe_window = 60
+    
+    for i in range(len(df_10s)):
+        if i < pe_window:
+            pe_values.append(np.nan)
+        else:
+            ts = df_10s['Pressure (hPa)'].iloc[i-pe_window:i].values
+            pe_values.append(permutation_entropy(ts, m=3, delay=1))
+            
+    df_10s['Permutation Entropy'] = pe_values
+    df_10s['Rolling Variance (10m)'] = df_10s['Pressure (hPa)'].rolling(pe_window).var()
+    
+    # Compute global spectral slope
+    nperseg = int(min(1024 * fs, len(df_base)))
+    freqs, power = welch(df_base['Pressure (hPa)'].values, fs=fs, nperseg=nperseg)
+    # Fit log-log slope for mid frequencies
+    valid = (freqs > 0.01) & (freqs < 0.1)
+    if np.sum(valid) > 2:
+        slope, _ = np.polyfit(np.log10(freqs[valid]), np.log10(power[valid]), 1)
+    else:
+        slope = np.nan
+        
+    metrics = {
+        'Global Spectral Slope': slope,
+        'Max Entropy': np.nanmax(pe_values) if len(pe_values) > 0 else np.nan,
+        'Min Entropy': np.nanmin(pe_values) if len(pe_values) > 0 else np.nan
+    }
+    
+    return df_10s, metrics
+
+# --- Layer 4: Micro-events (requires 32Hz data) ---
+def analyze_layer_4(df_32hz):
+    # High-pass filter above 1Hz to catch gusts and turbulence (micro-events)
+    fs = 32.0
+    nyq = 0.5 * fs
+    low = 1.0 / nyq
+    b, a = butter(4, low, btype='high')
+    
+    # Fill any remaining NaNs to prevent filter crash
+    data = df_32hz['Pressure (hPa)'].fillna(method='ffill').fillna(method='bfill').values
+    highpass = filtfilt(b, a, data)
+    
+    df_res = df_32hz[['Datetime', 'Pressure (hPa)']].copy()
+    df_res['High Frequency (>1Hz) Noise'] = highpass
+    
+    # Calculate rolling std as a proxy for wind gust intensity (1 second window = 32 points)
+    df_res['Gust Proxy (Rolling Std)'] = df_res['High Frequency (>1Hz) Noise'].rolling(32).std()
+    
+    metrics = {
+        'Max Gust Proxy': df_res['Gust Proxy (Rolling Std)'].max(),
+        'Avg Gust Proxy': df_res['Gust Proxy (Rolling Std)'].mean(),
+        'Pressure Skewness': df_32hz['Pressure (hPa)'].skew()
+    }
+    return df_res, metrics
+
+# --- Layer 5: Planetary Link ---
+def analyze_layer_5(df_l2_current, df_l2_baseline=None, external_mslp=None):
+    # Analyze amplitudes of Boss wave
+    # Get max amplitude of Boss band in current data
+    boss_current = df_l2_current['Boss (150-180m)'].max() - df_l2_current['Boss (150-180m)'].min()
+    
+    metrics = {
+        'Boss Wave Amplitude (Current)': boss_current,
+    }
+    
+    if df_l2_baseline is not None and 'Boss (150-180m)' in df_l2_baseline.columns:
+        boss_base = df_l2_baseline['Boss (150-180m)'].max() - df_l2_baseline['Boss (150-180m)'].min()
+        metrics['Boss Wave Amplitude (Baseline)'] = boss_base
+        metrics['Boss Amplitude Ratio'] = boss_current / boss_base if boss_base > 0 else np.nan
+        
+    if external_mslp is not None:
+        # Just simple comparison metric
+        metrics['Current MSLP Ref'] = external_mslp
+        
+    return metrics
+
+def export_features(folder_path, m1, m2, m3, m4, m5):
+    """
+    Exports summary metrics to Analysis_Result.csv
+    """
+    all_metrics = {}
+    all_metrics.update(m1)
+    
+    # m2 has dicts
+    all_metrics.update(m3)
+    all_metrics.update(m4)
+    all_metrics.update(m5)
+    
+    df_export = pd.DataFrame([all_metrics])
+    df_export['Analysis Datetime'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    out_path = os.path.join(folder_path, 'Analysis_Result.csv')
+    df_export.to_csv(out_path, index=False)
+    return out_path
+
