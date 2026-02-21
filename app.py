@@ -94,7 +94,7 @@ def main():
         fig.add_vline(x=t_min_val, line_width=1, line_dash="dot", line_color="#00d4ff")
         fig.add_annotation(x=t_min_val, y=0.0, yref="paper", yanchor="bottom", text=t_min_val.strftime('%H:%M:%S'), showarrow=False, font=dict(color="#00d4ff"), xanchor="left")
         
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "Layer 1 (Synoptic)", 
@@ -162,13 +162,13 @@ def main():
             fig1.add_annotation(x=t_min_tide, y=0.0, yref="paper", yanchor="bottom", text=t_min_tide.strftime('%H:%M:%S'), showarrow=False, font=dict(color="#ffaa00"), xanchor="right")
             
             fig1.update_xaxes(title=None)
-            st.plotly_chart(fig1, use_container_width=True)
+            st.plotly_chart(fig1, width="stretch")
             
             fig2 = px.line(df_l1_plot, x='Datetime', y=['Raw dP/dt (hPa/hr)', 'dP/dt (hPa/hr)'], title="Tốc độ biến thiên (dP/dt)", template="plotly_dark")
             fig2.update_traces(opacity=0.4, selector=dict(name='Raw dP/dt (hPa/hr)'))
             fig2.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
             fig2.update_xaxes(title=None)
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, width="stretch")
             
             # --- Astronomical Features Chart ---
             fig_astro = px.line(df_l1_plot, x='Datetime', y=['Solar Elevation (deg)', 'Moon Phase (days)'],
@@ -176,7 +176,7 @@ def main():
             fig_astro.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
             fig_astro.update_xaxes(title=None)
             # Put them on secondary y-axis or just rely on plotly autoscaling
-            st.plotly_chart(fig_astro, use_container_width=True)
+            st.plotly_chart(fig_astro, width="stretch")
             
         with tab2:
             st.header("2. Hệ thống Sóng (Boss/Mother/Child)")
@@ -196,21 +196,21 @@ def main():
                                          title="Tất cả Dải Sóng Kết Hợp (Macro + Micro)", template="plotly_dark")
             fig_waves_combined.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
             fig_waves_combined.update_xaxes(title=None)
-            st.plotly_chart(fig_waves_combined, use_container_width=True)
+            st.plotly_chart(fig_waves_combined, width="stretch")
                 
             # 2. Separated Macro Waves
             fig_waves = px.line(df_waves_plot, x='Datetime', y=macro_cols, 
                                 title="Các Dải Sóng Dài (Boss/Mother/Child - Vĩ mô)", template="plotly_dark")
             fig_waves.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
             fig_waves.update_xaxes(title=None)
-            st.plotly_chart(fig_waves, use_container_width=True)
+            st.plotly_chart(fig_waves, width="stretch")
             
             if micro_cols:
                 fig_micro = px.line(df_waves_plot, x='Datetime', y=micro_cols, 
                                     title="Dải Sóng Ngắn (Micro - Nhiễu động nhiệt)", template="plotly_dark", color_discrete_sequence=['#ffaa00'])
                 fig_micro.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
                 fig_micro.update_xaxes(title=None)
-                st.plotly_chart(fig_micro, use_container_width=True)
+                st.plotly_chart(fig_micro, width="stretch")
             
             df_fft = pd.DataFrame({'Period (minutes)': periods_min, 'Power': power_valid})
             df_fft = df_fft[(df_fft['Period (minutes)'] >= 10) & (df_fft['Period (minutes)'] <= 300)]
@@ -231,7 +231,7 @@ def main():
                 fig_fft.add_annotation(x=exact_peak_period, y=0.95, yref="paper", text=f"Peak: {exact_peak_period:.2f}m", showarrow=True, arrowhead=2, font=dict(color="white"))
                 
             fig_fft.update_xaxes(title=None)
-            st.plotly_chart(fig_fft, use_container_width=True)
+            st.plotly_chart(fig_fft, width="stretch")
             
         with tab3:
             st.header("3. Trạng thái Khí quyển (Atmosphere State)")
@@ -245,11 +245,11 @@ def main():
             
             fig3 = px.line(df_l3, x='Datetime', y='Permutation Entropy', title="Permutation Entropy (Rolling 10m)", template="plotly_dark")
             fig3.update_xaxes(title=None)
-            st.plotly_chart(fig3, use_container_width=True)
+            st.plotly_chart(fig3, width="stretch")
             
             fig3b = px.line(df_l3, x='Datetime', y='Rolling Variance (10m)', title="Rolling Variance (Proxy for Turbulence)", template="plotly_dark")
             fig3b.update_xaxes(title=None)
-            st.plotly_chart(fig3b, use_container_width=True)
+            st.plotly_chart(fig3b, width="stretch")
             
         with tab4:
             st.header("4. Nhiễu động cục bộ & Micro-events (32Hz)")
@@ -265,7 +265,7 @@ def main():
             
             fig4 = px.line(df_l4_plot, x='Datetime', y='Gust Proxy (Rolling Std)', title="Max Gust Proxy (1s Downsampled for plotting)", template="plotly_dark")
             fig4.update_xaxes(title=None)
-            st.plotly_chart(fig4, use_container_width=True)
+            st.plotly_chart(fig4, width="stretch")
             
         with tab5:
             st.header("5. Kết nối Hành tinh & External Anchor")

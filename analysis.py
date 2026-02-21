@@ -100,7 +100,7 @@ def analyze_layer_1(df_base, fs=1.0):
     df_res = df_base.copy()
     
     # 1. We use Gaussian Filter for mathematically smooth low-pass filtering and derivatives.
-    pressure_data = df_res['Pressure (hPa)'].interpolate(method='linear').fillna(method='bfill').fillna(method='ffill').values
+    pressure_data = df_res['Pressure (hPa)'].interpolate(method='linear').bfill().ffill().values
     
     sigma_10m = 600 * fs
     df_res['Smoothed (1h)'] = gaussian_filter1d(pressure_data, sigma=sigma_10m)
@@ -432,7 +432,7 @@ def analyze_layer_4(df_32hz):
     b, a = butter(4, low, btype='high')
     
     # Fill any remaining NaNs to prevent filter crash
-    data = df_32hz['Pressure (hPa)'].fillna(method='ffill').fillna(method='bfill').values
+    data = df_32hz['Pressure (hPa)'].ffill().bfill().values
     highpass = filtfilt(b, a, data)
     
     df_res = df_32hz[['Datetime', 'Pressure (hPa)']].copy()
