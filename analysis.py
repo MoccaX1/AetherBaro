@@ -310,6 +310,34 @@ def analyze_layer_2(df_base, fs=1.0):
             'peak': true_peak,
             'base_name': name
         }
+        
+    # 2.5 Find if there's a massive peak outside our predefined windows
+    if len(peak_periods) > 0:
+        global_max_idx = np.argmax(peak_powers)
+        global_peak_p = peak_periods[global_max_idx]
+        
+        # Check if this global peak is already captured by any of our dynamic bands
+        is_captured = False
+        for info in dynamic_bands.values():
+            low_p, high_p = info['period_range']
+            if low_p <= global_peak_p <= high_p:
+                is_captured = True
+                break
+                
+        if not is_captured and global_peak_p >= 5: # Ignore super high freq noise
+            # Create a wildcard band for this unexpected dominant wave
+            bw_ratio = 0.15
+            low_p = global_peak_p * (1 - bw_ratio)
+            high_p = global_peak_p * (1 + bw_ratio)
+            low_f = 1 / (high_p * 60)
+            high_f = 1 / (low_p * 60)
+            
+            dynamic_bands[f"Wildcard Peak ({global_peak_p:.1f}m)"] = {
+                'freqs': (low_f, high_f),
+                'period_range': (low_p, high_p),
+                'peak': global_peak_p,
+                'base_name': 'Wildcard'
+            }
     
     # 3. Filter the signals using the newly discovered dynamic bands
     filtered_signals = {}

@@ -187,12 +187,30 @@ def main():
                 df_waves[name] = sig
                 
             df_waves_plot = df_waves.iloc[::plot_step] if fs > 1.0 else df_waves
+            
+            macro_cols = [c for c in filtered_signals.keys() if 'Micro' not in c]
+            micro_cols = [c for c in filtered_signals.keys() if 'Micro' in c]
+            
+            # 1. Combined Plot (All Waves)
+            fig_waves_combined = px.line(df_waves_plot, x='Datetime', y=list(filtered_signals.keys()), 
+                                         title="Tất cả Dải Sóng Kết Hợp (Macro + Micro)", template="plotly_dark")
+            fig_waves_combined.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
+            fig_waves_combined.update_xaxes(title=None)
+            st.plotly_chart(fig_waves_combined, use_container_width=True)
                 
-            fig_waves = px.line(df_waves_plot, x='Datetime', y=list(filtered_signals.keys()), 
-                                title="Các Dải Sóng (Bandpass Filtered - Dynamic Centered)", template="plotly_dark")
+            # 2. Separated Macro Waves
+            fig_waves = px.line(df_waves_plot, x='Datetime', y=macro_cols, 
+                                title="Các Dải Sóng Dài (Boss/Mother/Child - Vĩ mô)", template="plotly_dark")
             fig_waves.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
             fig_waves.update_xaxes(title=None)
             st.plotly_chart(fig_waves, use_container_width=True)
+            
+            if micro_cols:
+                fig_micro = px.line(df_waves_plot, x='Datetime', y=micro_cols, 
+                                    title="Dải Sóng Ngắn (Micro - Nhiễu động nhiệt)", template="plotly_dark", color_discrete_sequence=['#ffaa00'])
+                fig_micro.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
+                fig_micro.update_xaxes(title=None)
+                st.plotly_chart(fig_micro, use_container_width=True)
             
             df_fft = pd.DataFrame({'Period (minutes)': periods_min, 'Power': power_valid})
             df_fft = df_fft[(df_fft['Period (minutes)'] >= 10) & (df_fft['Period (minutes)'] <= 300)]
@@ -201,7 +219,7 @@ def main():
                               title="Phổ năng lượng (Zero-padded FFT)", template="plotly_dark")
             
             # Draw dynamic bands
-            color_map = {'Boss': 'red', 'Mother': 'green', 'Child': 'blue', 'Micro': 'orange'}
+            color_map = {'Boss': 'red', 'Mother': 'green', 'Child': 'blue', 'Micro': 'orange', 'Wildcard': 'purple'}
             for info in dynamic_bands.values():
                 low_p, high_p = info['period_range']
                 base_name = info['base_name']
