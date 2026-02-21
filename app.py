@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import pandas as pd
+import numpy as np
 import plotly.express as px
 from analysis import (
     load_and_preprocess_data, 
@@ -23,6 +24,30 @@ def get_processed_data(folder_path, target_fs=1.0):
     st.write(f"Đang xử lý dữ liệu từ: {folder_path} (Tần số: {target_fs}Hz)...")
     df_32hz, df_base = load_and_preprocess_data(folder_path, target_fs=target_fs)
     return df_32hz, df_base
+
+def load_device_info(folder_path):
+    device_path = os.path.join(folder_path, "meta", "device.csv")
+    info = {'Resolution': 0.01, 'Model': 'Unknown', 'Sensor': 'Unknown'}
+    if os.path.exists(device_path):
+        try:
+            df = pd.read_csv(device_path)
+            res_rows = df[df['property'] == 'pressure Resolution']
+            if not res_rows.empty:
+                info['Resolution'] = float(res_rows['value'].values[0])
+            
+            model_rows = df[df['property'] == 'deviceModel']
+            if not model_rows.empty:
+                info['Model'] = model_rows['value'].values[0]
+                
+            vendor_rows = df[df['property'] == 'pressure Vendor']
+            name_rows = df[df['property'] == 'pressure Name']
+            vendor = vendor_rows['value'].values[0] if not vendor_rows.empty else ""
+            name = name_rows['value'].values[0] if not name_rows.empty else ""
+            if vendor or name:
+                info['Sensor'] = f"{vendor} {name}".strip()
+        except Exception:
+            pass
+    return info
 
 def main():
     st.sidebar.header("Chọn Dữ Liệu")
@@ -69,7 +94,13 @@ def main():
         
         st.sidebar.success(f"✅ Dữ liệu đã được tiền xử lý ({int(fs)}Hz)")
         
+        # Load Device Info
+        device_info = load_device_info(folder_path)
+        tolerance = device_info['Resolution']
+        
         st.write(f"### Tổng quan dữ liệu Gốc (Đã Resample {int(fs)}Hz cho hiệu năng)")
+        st.caption(f"**Thiết bị đo:** {device_info['Model']} | **Cảm biến Áp suất:** {device_info['Sensor']} | **Sai số phần cứng (Tolerance):** $\pm{tolerance}$ hPa")
+        
         # Plot downsampled if it's 32Hz to avoid massive browser lag
         plot_df = df_base.iloc[::int(max(1, fs))] if fs == 32.0 else df_base
         
@@ -77,22 +108,31 @@ def main():
                      template="plotly_dark")
         fig.update_xaxes(title=None)
                      
-        # Extract Min/Max
-        idx_max = plot_df['Pressure (hPa)'].idxmax()
-        idx_min = plot_df['Pressure (hPa)'].idxmin()
-        p_max_val = plot_df.loc[idx_max, 'Pressure (hPa)']
-        t_max_val = plot_df.loc[idx_max, 'Datetime']
-        p_min_val = plot_df.loc[idx_min, 'Pressure (hPa)']
-        t_min_val = plot_df.loc[idx_min, 'Datetime']
+        # Extract Min/Max with Dynamic Sensor Error Margin
+        p_max_val = plot_df['Pressure (hPa)'].max()
+        p_min_val = plot_df['Pressure (hPa)'].min()
         
-        fig.add_scatter(x=[t_max_val], y=[p_max_val], mode='markers+text', text=[f"Pmax: {p_max_val:.2f}"], textposition="top center", marker=dict(color='#ff4b4b', size=8), showlegend=False)
-        fig.add_scatter(x=[t_min_val], y=[p_min_val], mode='markers+text', text=[f"Pmin: {p_min_val:.2f}"], textposition="bottom center", marker=dict(color='#00d4ff', size=8), showlegend=False)
+        t_max_series = plot_df[p_max_val - plot_df['Pressure (hPa)'] <= tolerance]['Datetime']
+        t_min_series = plot_df[plot_df['Pressure (hPa)'] - p_min_val <= tolerance]['Datetime']
         
-        fig.add_vline(x=t_max_val, line_width=1, line_dash="dot", line_color="#ff4b4b")
-        fig.add_annotation(x=t_max_val, y=0.0, yref="paper", yanchor="bottom", text=t_max_val.strftime('%H:%M:%S'), showarrow=False, font=dict(color="#ff4b4b"), xanchor="left")
+        # Plot all points rapidly as a single scatter trace
+        fig.add_scatter(x=t_max_series, y=plot_df.loc[t_max_series.index, 'Pressure (hPa)'], mode='markers', marker=dict(color='#ff4b4b', size=8), showlegend=False, name="Pmax Area")
+        fig.add_scatter(x=t_min_series, y=plot_df.loc[t_min_series.index, 'Pressure (hPa)'], mode='markers', marker=dict(color='#00d4ff', size=8), showlegend=False, name="Pmin Area")
         
-        fig.add_vline(x=t_min_val, line_width=1, line_dash="dot", line_color="#00d4ff")
-        fig.add_annotation(x=t_min_val, y=0.0, yref="paper", yanchor="bottom", text=t_min_val.strftime('%H:%M:%S'), showarrow=False, font=dict(color="#00d4ff"), xanchor="left")
+        # Add labels only for distinct peaks (separated by 30 mins) to prevent annotation lag
+        def annotate_clusters_overview(t_series, p_val, color, prefix, y_pos):
+            if t_series.empty: return
+            clusters = [t_series.iloc[0]]
+            for t in t_series.iloc[1:]:
+                if (t - clusters[-1]).total_seconds() > 1800:
+                    clusters.append(t)
+            for t_rep in clusters:
+                fig.add_annotation(x=t_rep, y=p_val, text=f"{prefix}: {p_val:.2f}", showarrow=True, arrowhead=1, ax=0, ay=-30 if y_pos=='top' else 30, font=dict(color=color))
+                fig.add_vline(x=t_rep, line_width=1, line_dash="dot", line_color=color)
+                fig.add_annotation(x=t_rep, y=0.0, yref="paper", yanchor="bottom", text=t_rep.strftime('%H:%M:%S'), showarrow=False, font=dict(color=color), xanchor="left")
+
+        annotate_clusters_overview(t_max_series, p_max_val, '#ff4b4b', 'Pmax', 'top')
+        annotate_clusters_overview(t_min_series, p_min_val, '#00d4ff', 'Pmin', 'top')
         
         st.plotly_chart(fig, width="stretch")
         
@@ -127,40 +167,44 @@ def main():
             fig1.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
             fig1.update_xaxes(title=None)
             
-            # Add annotations and projections
-            idx_max_l1 = df_l1['Pressure (hPa)'].idxmax()
-            idx_min_l1 = df_l1['Pressure (hPa)'].idxmin()
-            idx_max_tide = df_l1['Theoretical Tide (Solar+Lunar)'].idxmax()
-            idx_min_tide = df_l1['Theoretical Tide (Solar+Lunar)'].idxmin()
+            # Add annotations and projections for multiple extremum points with Dynamic Tolerance
+            # 1. Base Pressure Max/Min
+            p_max_l1 = df_l1['Pressure (hPa)'].max()
+            p_min_l1 = df_l1['Pressure (hPa)'].min()
             
-            t_max_l1 = df_l1.loc[idx_max_l1, 'Datetime']
-            p_max_l1 = df_l1.loc[idx_max_l1, 'Pressure (hPa)']
-            t_min_l1 = df_l1.loc[idx_min_l1, 'Datetime']
-            p_min_l1 = df_l1.loc[idx_min_l1, 'Pressure (hPa)']
+            t_max_l1_series = df_l1[p_max_l1 - df_l1['Pressure (hPa)'] <= tolerance]['Datetime']
+            t_min_l1_series = df_l1[df_l1['Pressure (hPa)'] - p_min_l1 <= tolerance]['Datetime']
             
-            t_max_tide = df_l1.loc[idx_max_tide, 'Datetime']
-            p_max_tide = df_l1.loc[idx_max_tide, 'Theoretical Tide (Solar+Lunar)']
-            t_min_tide = df_l1.loc[idx_min_tide, 'Datetime']
-            p_min_tide = df_l1.loc[idx_min_tide, 'Theoretical Tide (Solar+Lunar)']
+            # 2. Theoretical Tide Max/Min (We can use a slightly larger tolerance for tides if needed, but hardware tolerance is fine)
+            p_max_tide = df_l1['Theoretical Tide (Solar+Lunar)'].max()
+            p_min_tide = df_l1['Theoretical Tide (Solar+Lunar)'].min()
             
-            fig1.add_scatter(x=[t_max_l1], y=[p_max_l1], mode='markers+text', text=[f"Pmax: {p_max_l1:.2f}"], textposition="top center", marker=dict(color='#ff4b4b', size=8), showlegend=False)
-            fig1.add_scatter(x=[t_min_l1], y=[p_min_l1], mode='markers+text', text=[f"Pmin: {p_min_l1:.2f}"], textposition="bottom center", marker=dict(color='#00d4ff', size=8), showlegend=False)
+            t_max_tide_series = df_l1[p_max_tide - df_l1['Theoretical Tide (Solar+Lunar)'] <= tolerance]['Datetime']
+            t_min_tide_series = df_l1[df_l1['Theoretical Tide (Solar+Lunar)'] - p_min_tide <= tolerance]['Datetime']
             
-            fig1.add_scatter(x=[t_max_tide], y=[p_max_tide], mode='markers+text', text=[f"Tide Max: {p_max_tide:.2f}"], textposition="top center", marker=dict(color='#ffaa00', size=8), showlegend=False)
-            fig1.add_scatter(x=[t_min_tide], y=[p_min_tide], mode='markers+text', text=[f"Tide Min: {p_min_tide:.2f}"], textposition="bottom center", marker=dict(color='#ffaa00', size=8), showlegend=False)
+            # Fast bulk scatter plotting
+            fig1.add_scatter(x=t_max_l1_series, y=df_l1.loc[t_max_l1_series.index, 'Pressure (hPa)'], mode='markers', marker=dict(color='#ff4b4b', size=8), showlegend=False)
+            fig1.add_scatter(x=t_min_l1_series, y=df_l1.loc[t_min_l1_series.index, 'Pressure (hPa)'], mode='markers', marker=dict(color='#00d4ff', size=8), showlegend=False)
+            fig1.add_scatter(x=t_max_tide_series, y=df_l1.loc[t_max_tide_series.index, 'Theoretical Tide (Solar+Lunar)'], mode='markers', marker=dict(color='#ffaa00', size=8), showlegend=False)
+            fig1.add_scatter(x=t_min_tide_series, y=df_l1.loc[t_min_tide_series.index, 'Theoretical Tide (Solar+Lunar)'], mode='markers', marker=dict(color='#ffaa00', size=8), showlegend=False)
             
-            fig1.add_vline(x=t_max_l1, line_width=1, line_dash="dot", line_color="#ff4b4b")
-            fig1.add_annotation(x=t_max_l1, y=0.0, yref="paper", yanchor="bottom", text=t_max_l1.strftime('%H:%M:%S'), showarrow=False, font=dict(color="#ff4b4b"), xanchor="left")
-            
-            fig1.add_vline(x=t_min_l1, line_width=1, line_dash="dot", line_color="#00d4ff")
-            fig1.add_annotation(x=t_min_l1, y=0.0, yref="paper", yanchor="bottom", text=t_min_l1.strftime('%H:%M:%S'), showarrow=False, font=dict(color="#00d4ff"), xanchor="left")
-            
-            fig1.add_vline(x=t_max_tide, line_width=1, line_dash="dot", line_color="#ffaa00")
-            fig1.add_annotation(x=t_max_tide, y=0.0, yref="paper", yanchor="bottom", text=t_max_tide.strftime('%H:%M:%S'), showarrow=False, font=dict(color="#ffaa00"), xanchor="right")
-            
-            fig1.add_vline(x=t_min_tide, line_width=1, line_dash="dot", line_color="#ffaa00")
-            fig1.add_annotation(x=t_min_tide, y=0.0, yref="paper", yanchor="bottom", text=t_min_tide.strftime('%H:%M:%S'), showarrow=False, font=dict(color="#ffaa00"), xanchor="right")
-            
+            # Cluster text annotations (30 min gaps) to avoid browser freeze
+            def annotate_clusters_l1(t_series, p_val, color, prefix, y_pos):
+                if t_series.empty: return
+                clusters = [t_series.iloc[0]]
+                for t in t_series.iloc[1:]:
+                    if (t - clusters[-1]).total_seconds() > 1800:
+                        clusters.append(t)
+                for t_rep in clusters:
+                    fig1.add_annotation(x=t_rep, y=p_val, text=f"{prefix}: {p_val:.2f}", showarrow=True, arrowhead=1, ax=0, ay=-30 if y_pos=='top' else 30, font=dict(color=color))
+                    fig1.add_vline(x=t_rep, line_width=1, line_dash="dot", line_color=color)
+                    fig1.add_annotation(x=t_rep, y=0.0, yref="paper", yanchor="bottom", text=t_rep.strftime('%H:%M:%S'), showarrow=False, font=dict(color=color), xanchor="left")
+
+            annotate_clusters_l1(t_max_l1_series, p_max_l1, '#ff4b4b', 'Pmax', 'top')
+            annotate_clusters_l1(t_min_l1_series, p_min_l1, '#00d4ff', 'Pmin', 'top')
+            annotate_clusters_l1(t_max_tide_series, p_max_tide, '#ffaa00', 'Tide Max', 'top')
+            annotate_clusters_l1(t_min_tide_series, p_min_tide, '#ffaa00', 'Tide Min', 'top')
+                
             fig1.update_xaxes(title=None)
             st.plotly_chart(fig1, width="stretch")
             
