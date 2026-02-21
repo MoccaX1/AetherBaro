@@ -220,41 +220,80 @@ def compute_zero_padded_fft(data, fs, pad_factor=4):
 
 # --- Layer 2: Wave Spectrum ---
 def analyze_layer_2(df_base, fs=1.0):
+    from scipy.signal import find_peaks
     data = df_base['Pressure (hPa)'].values
     
-    # Define Bands in Hz
-    # Boss: 150-180 min -> 9000-10800 seconds -> f = 1/T: 0.000092 Hz to 0.000111 Hz
-    # Mother: 75-85 min -> 4500-5100 seconds
-    # Child: 35-45 min -> 2100-2700 seconds
-    
-    bands = {
-        'Boss (150-180m)': (1/(180*60), 1/(150*60)),
-        'Mother (75-85m)': (1/(85*60), 1/(75*60)),
-        'Child (35-45m)': (1/(45*60), 1/(35*60)),
-        'Micro (15-25m)': (1/(25*60), 1/(15*60))
-    }
-    
-    filtered_signals = {}
-    for name, (low, high) in bands.items():
-        filtered_signals[name] = butter_bandpass_filter(data, low, high, fs)
-        
-    # Zero-padded FFT
+    # 1. Zero-padded FFT First to find true peaks
     freqs, power = compute_zero_padded_fft(data, fs, pad_factor=8)
-    # Convert freq to Period in minutes for plotting
-    # Ignore 0 freq to avoid division by zero
     valid_idx = freqs > 0
     periods_min = (1 / freqs[valid_idx]) / 60
     power_valid = power[valid_idx]
     
-    # Extract exact peak period (between 10m and 300m to avoid noise)
-    mask = (periods_min >= 10) & (periods_min <= 300)
-    if mask.any():
-        peak_idx = np.argmax(power_valid[mask])
-        exact_peak_period = periods_min[mask][peak_idx]
+    # Pre-smooth the power spectrum slightly to avoid finding noise spikes as peaks
+    power_smoothed = gaussian_filter1d(power_valid, sigma=2)
+    
+    # Find all peaks in the smoothed spectrum
+    peaks, _ = find_peaks(power_smoothed, distance=10) # distance to ensure peaks are separated
+    peak_periods = periods_min[peaks]
+    peak_powers = power_smoothed[peaks]
+    
+    # 2. Define physical search windows for wave types
+    search_windows = {
+        'Boss': (120, 240, 0.15),  # (min_period, max_period, bandwidth_ratio +/-)
+        'Mother': (60, 110, 0.15),
+        'Child': (30, 55, 0.15),
+        'Micro': (10, 25, 0.15)
+    }
+    
+    dynamic_bands = {}
+    
+    for name, (min_p, max_p, bw_ratio) in search_windows.items():
+        # Find peaks within this specific physical window
+        mask = (peak_periods >= min_p) & (peak_periods <= max_p)
+        valid_peaks = peak_periods[mask]
+        valid_powers = peak_powers[mask]
+        
+        if len(valid_peaks) > 0:
+            # Pick the strongest peak in this window
+            best_idx = np.argmax(valid_powers)
+            true_peak = valid_peaks[best_idx]
+            
+            # Create a dynamic band around this true peak
+            low_p = true_peak * (1 - bw_ratio)
+            high_p = true_peak * (1 + bw_ratio)
+        else:
+            # Fallback to default center if no clear peak is found
+            center = (min_p + max_p) / 2
+            low_p = center * (1 - bw_ratio)
+            high_p = center * (1 + bw_ratio)
+            true_peak = center
+            
+        # Convert period (minutes) to frequencies (Hz) for the filter
+        low_f = 1 / (high_p * 60)
+        high_f = 1 / (low_p * 60)
+        
+        dynamic_bands[f"{name} ({true_peak:.1f}m)"] = {
+            'freqs': (low_f, high_f),
+            'period_range': (low_p, high_p),
+            'peak': true_peak,
+            'base_name': name
+        }
+    
+    # 3. Filter the signals using the newly discovered dynamic bands
+    filtered_signals = {}
+    for label, info in dynamic_bands.items():
+        low_f, high_f = info['freqs']
+        filtered_signals[label] = butter_bandpass_filter(data, low_f, high_f, fs)
+        
+    # Extract exact global peak period (between 10m and 300m)
+    global_mask = (periods_min >= 10) & (periods_min <= 300)
+    if global_mask.any():
+        global_peak_idx = np.argmax(power_valid[global_mask])
+        exact_peak_period = periods_min[global_mask][global_peak_idx]
     else:
         exact_peak_period = None
     
-    return filtered_signals, freqs, power, periods_min, power_valid, exact_peak_period
+    return filtered_signals, freqs, power, periods_min, power_valid, exact_peak_period, dynamic_bands
 
 # --- Layer 3: Atmospheric State ---
 def permutation_entropy(time_series, m=3, delay=1):
@@ -352,17 +391,26 @@ def analyze_layer_4(df_32hz):
 # --- Layer 5: Planetary Link ---
 def analyze_layer_5(df_l2_current, df_l2_baseline=None, external_mslp=None):
     # Analyze amplitudes of Boss wave
-    # Get max amplitude of Boss band in current data
-    boss_current = df_l2_current['Boss (150-180m)'].max() - df_l2_current['Boss (150-180m)'].min()
+    # Find the dynamic Boss column name (e.g. 'Boss (162.3m)')
+    boss_col_current = next((col for col in df_l2_current.columns if col.startswith('Boss')), None)
     
-    metrics = {
-        'Boss Wave Amplitude (Current)': boss_current,
-    }
-    
-    if df_l2_baseline is not None and 'Boss (150-180m)' in df_l2_baseline.columns:
-        boss_base = df_l2_baseline['Boss (150-180m)'].max() - df_l2_baseline['Boss (150-180m)'].min()
-        metrics['Boss Wave Amplitude (Baseline)'] = boss_base
-        metrics['Boss Amplitude Ratio'] = boss_current / boss_base if boss_base > 0 else np.nan
+    metrics = {}
+    if boss_col_current is not None:
+        boss_current = df_l2_current[boss_col_current].max() - df_l2_current[boss_col_current].min()
+        metrics['Boss Wave Amplitude (Current)'] = boss_current
+    else:
+        boss_current = np.nan
+        metrics['Boss Wave Amplitude (Current)'] = np.nan
+        
+    if df_l2_baseline is not None:
+        boss_col_base = next((col for col in df_l2_baseline.columns if col.startswith('Boss')), None)
+        if boss_col_base is not None:
+            boss_base = df_l2_baseline[boss_col_base].max() - df_l2_baseline[boss_col_base].min()
+            metrics['Boss Wave Amplitude (Baseline)'] = boss_base
+            if not np.isnan(boss_current) and boss_base > 0:
+                metrics['Boss Amplitude Ratio'] = boss_current / boss_base
+            else:
+                metrics['Boss Amplitude Ratio'] = np.nan
         
     if external_mslp is not None:
         # Just simple comparison metric

@@ -174,14 +174,14 @@ def main():
             
         with tab2:
             st.header("2. Hệ thống Sóng (Boss/Mother/Child)")
-            filtered_signals, freqs, power, periods_min, power_valid, exact_peak_period = analyze_layer_2(df_base, fs=fs)
+            filtered_signals, freqs, power, periods_min, power_valid, exact_peak_period, dynamic_bands = analyze_layer_2(df_base, fs=fs)
             
             df_waves = df_base[['Datetime']].copy()
             for name, sig in filtered_signals.items():
                 df_waves[name] = sig
                 
             fig_waves = px.line(df_waves, x='Datetime', y=list(filtered_signals.keys()), 
-                                title="Các Dải Sóng (Bandpass Filtered)", template="plotly_dark")
+                                title="Các Dải Sóng (Bandpass Filtered - Dynamic Centered)", template="plotly_dark")
             fig_waves.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
             fig_waves.update_xaxes(title=None)
             st.plotly_chart(fig_waves, use_container_width=True)
@@ -191,10 +191,14 @@ def main():
             
             fig_fft = px.line(df_fft, x='Period (minutes)', y='Power', log_y=True, 
                               title="Phổ năng lượng (Zero-padded FFT)", template="plotly_dark")
-            fig_fft.add_vrect(x0=150, x1=180, fillcolor="red", opacity=0.2, line_width=0, annotation_text="Boss")
-            fig_fft.add_vrect(x0=75, x1=85, fillcolor="green", opacity=0.2, line_width=0, annotation_text="Mother")
-            fig_fft.add_vrect(x0=35, x1=45, fillcolor="blue", opacity=0.2, line_width=0, annotation_text="Child")
-            fig_fft.add_vrect(x0=15, x1=25, fillcolor="orange", opacity=0.2, line_width=0, annotation_text="Micro")
+            
+            # Draw dynamic bands
+            color_map = {'Boss': 'red', 'Mother': 'green', 'Child': 'blue', 'Micro': 'orange'}
+            for info in dynamic_bands.values():
+                low_p, high_p = info['period_range']
+                base_name = info['base_name']
+                color = color_map.get(base_name, 'gray')
+                fig_fft.add_vrect(x0=low_p, x1=high_p, fillcolor=color, opacity=0.15, line_width=0, annotation_text=base_name)
             
             if exact_peak_period is not None:
                 fig_fft.add_vline(x=exact_peak_period, line_width=2, line_dash="dash", line_color="white")
@@ -244,7 +248,7 @@ def main():
             if baseline_folder != "None":
                 base_path = os.path.join(DATA_DIR, baseline_folder)
                 _, df_base_compare = get_processed_data(base_path, target_fs=fs)
-                df_l2_baseline_waves, _, _, _, _, _ = analyze_layer_2(df_base_compare, fs=fs)
+                df_l2_baseline_waves, _, _, _, _, _, _ = analyze_layer_2(df_base_compare, fs=fs)
                 # Convert dict to df for convenience
                 df_l2_baseline_waves = pd.DataFrame(df_l2_baseline_waves)
                 
