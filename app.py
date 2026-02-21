@@ -114,7 +114,12 @@ def main():
             c3.metric("Min dP/dt", f"{metrics_l1['Min dP/dt']:.4f} hPa/hr")
             c4.metric("Moon Phase", f"{metrics_l1.get('Avg Moon Phase', 0):.1f} days")
             
-            fig1 = px.line(df_l1, x='Datetime', y=['Pressure (hPa)', 'Smoothed (1h)', 'Theoretical Tide (Solar+Lunar)', 'Residual Pressure (Synoptic Only)'], 
+            # --- Performance Boost for Plotly Rendering ---
+            # Max 1Hz for visualization to prevent browser freezing on dense 32Hz data
+            plot_step = int(max(1, fs))
+            df_l1_plot = df_l1.iloc[::plot_step] if fs > 1.0 else df_l1
+            
+            fig1 = px.line(df_l1_plot, x='Datetime', y=['Pressure (hPa)', 'Smoothed (1h)', 'Theoretical Tide (Solar+Lunar)', 'Residual Pressure (Synoptic Only)'], 
                            title="Synoptic Trend & Atmospheric Tides", template="plotly_dark")
             
             # Make theoretical tide dashed for clarity
@@ -156,16 +161,17 @@ def main():
             fig1.add_vline(x=t_min_tide, line_width=1, line_dash="dot", line_color="#ffaa00")
             fig1.add_annotation(x=t_min_tide, y=0.0, yref="paper", yanchor="bottom", text=t_min_tide.strftime('%H:%M:%S'), showarrow=False, font=dict(color="#ffaa00"), xanchor="right")
             
+            fig1.update_xaxes(title=None)
             st.plotly_chart(fig1, use_container_width=True)
             
-            fig2 = px.line(df_l1, x='Datetime', y=['Raw dP/dt (hPa/hr)', 'dP/dt (hPa/hr)'], title="Tốc độ biến thiên (dP/dt)", template="plotly_dark")
+            fig2 = px.line(df_l1_plot, x='Datetime', y=['Raw dP/dt (hPa/hr)', 'dP/dt (hPa/hr)'], title="Tốc độ biến thiên (dP/dt)", template="plotly_dark")
             fig2.update_traces(opacity=0.4, selector=dict(name='Raw dP/dt (hPa/hr)'))
             fig2.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
             fig2.update_xaxes(title=None)
             st.plotly_chart(fig2, use_container_width=True)
             
             # --- Astronomical Features Chart ---
-            fig_astro = px.line(df_l1, x='Datetime', y=['Solar Elevation (deg)', 'Moon Phase (days)'],
+            fig_astro = px.line(df_l1_plot, x='Datetime', y=['Solar Elevation (deg)', 'Moon Phase (days)'],
                                title="Thông số Thiên văn (Solar Elevation & Moon Phase)", template="plotly_dark")
             fig_astro.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
             fig_astro.update_xaxes(title=None)
@@ -180,7 +186,9 @@ def main():
             for name, sig in filtered_signals.items():
                 df_waves[name] = sig
                 
-            fig_waves = px.line(df_waves, x='Datetime', y=list(filtered_signals.keys()), 
+            df_waves_plot = df_waves.iloc[::plot_step] if fs > 1.0 else df_waves
+                
+            fig_waves = px.line(df_waves_plot, x='Datetime', y=list(filtered_signals.keys()), 
                                 title="Các Dải Sóng (Bandpass Filtered - Dynamic Centered)", template="plotly_dark")
             fig_waves.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
             fig_waves.update_xaxes(title=None)

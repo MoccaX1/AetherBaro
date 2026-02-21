@@ -104,7 +104,10 @@ def analyze_layer_1(df_base, fs=1.0):
     
     sigma_10m = 600 * fs
     df_res['Smoothed (1h)'] = gaussian_filter1d(pressure_data, sigma=sigma_10m)
-    df_res['dP/dt (hPa/hr)'] = gaussian_filter1d(pressure_data, sigma=sigma_10m, order=1) * (3600.0 * fs)
+    
+    # Use a shorter window (e.g. 1 minutes) for dP/dt so it doesn't get completely flattened
+    sigma_1m = 60 * fs
+    df_res['dP/dt (hPa/hr)'] = gaussian_filter1d(pressure_data, sigma=sigma_1m, order=1) * (3600.0 * fs)
     df_res['Raw dP/dt (hPa/hr)'] = np.gradient(pressure_data) * (3600.0 * fs)
     
     sigma_30m = 1800 * fs
@@ -119,27 +122,46 @@ def analyze_layer_1(df_base, fs=1.0):
     # Vietnam Location: Latitude ~10.76 (HCMC/Tan An), Longitude ~106.66
     loc = LocationInfo("Vietnam", "Vietnam", "Asia/Ho_Chi_Minh", 10.7626, 106.6601)
     
-    theoretical_tides = []
-    solar_elevations = []
-    moon_phases = []
-    
     # S1 (diurnal solar), S2 (semidiurnal solar), M2 (semidiurnal lunar)
     # Amplitudes are approximate for tropical latitudes (in hPa)
     amp_s1 = 0.5   
     amp_s2 = 1.2   
     amp_m2 = 0.1   
     
-    for dt in df_res['Datetime']:
+    # To optimize execution time for high-frequency data (e.g. 32Hz = 100k+ points),
+    # we compute astronomical events on a sparse timeline (every 5 minutes) and interpolate.
+    t_seconds = (df_res['Datetime'] - df_res['Datetime'].iloc[0]).dt.total_seconds().values
+    
+    sparse_step = 300 # 5 minutes
+    if len(t_seconds) > 0:
+        if t_seconds[-1] < sparse_step:
+            sparse_t = np.array([0, t_seconds[-1]]) if t_seconds[-1] > 0 else np.array([0])
+        else:
+            sparse_t = np.arange(0, t_seconds[-1] + sparse_step, sparse_step)
+            # Ensure the last point is covered
+            if sparse_t[-1] < t_seconds[-1]:
+                sparse_t = np.append(sparse_t, t_seconds[-1])
+        
+        sparse_dts = [df_res['Datetime'].iloc[0] + pd.Timedelta(seconds=s) for s in sparse_t]
+    else:
+        sparse_t = []
+        sparse_dts = []
+        
+    theoretic_sparse = []
+    sol_elev_sparse = []
+    m_phase_sparse = []
+    
+    for dt in sparse_dts:
         # tz-aware datetime required by astral
         dt_aware = dt.tz_localize('Asia/Ho_Chi_Minh') if dt.tzinfo is None else dt
         
         # Solar elevation (degrees) -> controls S1, S2 heating cycle
         sol_elev = elevation(loc.observer, dt_aware)
-        solar_elevations.append(sol_elev)
+        sol_elev_sparse.append(sol_elev)
         
         # Moon phase (0-27.9 days)
         m_phase = phase(dt_aware)
-        moon_phases.append(m_phase)
+        m_phase_sparse.append(m_phase)
         
         # Time variables in days for harmonic formulas
         t_hours = dt_aware.hour + dt_aware.minute / 60.0 + dt_aware.second / 3600.0
@@ -155,9 +177,17 @@ def analyze_layer_1(df_base, fs=1.0):
         tide_m2 = amp_m2 * np.cos(2 * np.pi * (lunar_hours) / 12.42)
         
         # Total Theoretical Tide offset
-        tide_total = tide_s1 + tide_s2 + tide_m2
-        theoretical_tides.append(tide_total)
+        theoretic_sparse.append(tide_s1 + tide_s2 + tide_m2)
         
+    # Interpolate back to full high-resolution array
+    if len(sparse_t) > 1:
+        theoretical_tides = np.interp(t_seconds, sparse_t, theoretic_sparse)
+        solar_elevations = np.interp(t_seconds, sparse_t, sol_elev_sparse)
+        moon_phases = np.interp(t_seconds, sparse_t, m_phase_sparse)
+    elif len(sparse_t) == 1:
+        theoretical_tides = np.full(len(t_seconds), theoretic_sparse[0])
+        solar_elevations = np.full(len(t_seconds), sol_elev_sparse[0])
+        moon_phases = np.full(len(t_seconds), m_phase_sparse[0])
     # Standardize atmospheric tide vertically to match the intercept of the data
     tide_array = np.array(theoretical_tides)
     mean_pressure = np.mean(pressure_data)
@@ -238,11 +268,13 @@ def analyze_layer_2(df_base, fs=1.0):
     peak_powers = power_smoothed[peaks]
     
     # 2. Define physical search windows for wave types
+    # Adjusted based on empirical AI findings:
+    # 160m (File Length/Boss), 80m (Dominant Mother), 40m (Harmonic Child), 12m (Thermal Micro)
     search_windows = {
-        'Boss': (120, 240, 0.15),  # (min_period, max_period, bandwidth_ratio +/-)
-        'Mother': (60, 110, 0.15),
-        'Child': (30, 55, 0.15),
-        'Micro': (10, 25, 0.15)
+        'Boss': (140, 200, 0.1),    # Narrower bw_ratio to lock onto the actual long trend
+        'Mother': (70, 95, 0.15),
+        'Child': (35, 48, 0.15),
+        'Micro': (10, 25, 0.2)      # Wider bw_ratio for thermal fluctuations
     }
     
     dynamic_bands = {}
