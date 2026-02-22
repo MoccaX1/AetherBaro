@@ -99,7 +99,7 @@ def main():
         tolerance = device_info['Resolution']
         
         st.write(f"### Tổng quan dữ liệu Gốc (Đã Resample {int(fs)}Hz cho hiệu năng)")
-        st.caption(f"**Thiết bị đo:** {device_info['Model']} | **Cảm biến Áp suất:** {device_info['Sensor']} | **Sai số phần cứng (Tolerance):** $\pm{tolerance}$ hPa")
+        st.caption(rf"**Thiết bị đo:** {device_info['Model']} | **Cảm biến Áp suất:** {device_info['Sensor']} | **Sai số phần cứng (Tolerance):** $\pm{tolerance}$ hPa")
         
         # Plot downsampled if it's 32Hz to avoid massive browser lag
         plot_df = df_base.iloc[::int(max(1, fs))] if fs == 32.0 else df_base
