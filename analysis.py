@@ -491,6 +491,58 @@ def analyze_layer_5(df_l2_current, df_l2_baseline=None, external_mslp=None):
         
     return metrics
 
+# --- Layer 6: Device Evaluation ---
+def analyze_device_performance(df_32hz, device_info):
+    """
+    Evaluates hardware performance based on metadata and raw 32Hz data.
+    """
+    metrics = {}
+    
+    # 1. Missing Data / Continuity
+    time_diffs = df_32hz['Datetime'].diff().dt.total_seconds()
+    max_gap = time_diffs.max()
+    expected_gap = 1.0 / 32.0
+    metrics['Max Time Gap (s)'] = max_gap
+    # Consider gap > 2 * expected as missing data
+    metrics['Data Missing Ratio (%)'] = np.sum(time_diffs > (expected_gap * 2)) / len(time_diffs) * 100
+    
+    # 2. Hardware Noise vs Tolerance
+    # Isolate high-frequency noise
+    fs = 32.0
+    nyq = 0.5 * fs
+    b, a = butter(4, 1.0 / nyq, btype='high')
+    data = df_32hz['Pressure (hPa)'].ffill().bfill().values
+    noise = filtfilt(b, a, data)
+    
+    empirical_noise_std = np.std(noise)
+    metrics['Empirical Noise Std (hPa)'] = empirical_noise_std
+    
+    hardware_tolerance = device_info.get('Resolution', 0.01)
+    
+    # 3. Empirical Resolution (Minimum non-zero difference)
+    unique_vals = np.sort(df_32hz['Pressure (hPa)'].unique())
+    diffs = np.diff(unique_vals)
+    diffs = diffs[diffs > 1e-6] # Avoid floating point tiny diffs
+    if len(diffs) > 0:
+        empirical_res = np.min(diffs)
+    else:
+        empirical_res = hardware_tolerance
+    
+    metrics['Empirical Resolution (hPa)'] = empirical_res
+    
+    # Reliability score (0-100)
+    score = 100
+    if metrics['Data Missing Ratio (%)'] > 0.5:
+        score -= min(40, metrics['Data Missing Ratio (%)'] * 10)
+    if empirical_noise_std > hardware_tolerance:
+        penalty = ((empirical_noise_std - hardware_tolerance) / hardware_tolerance) * 20
+        score -= min(40, penalty)
+    
+    metrics['Reliability Score'] = max(0, score)
+    metrics['Noise Signal'] = noise
+    
+    return metrics
+
 def export_features(folder_path, m1, m2, m3, m4, m5):
     """
     Exports summary metrics to Analysis_Result.csv

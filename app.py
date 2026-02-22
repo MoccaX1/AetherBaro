@@ -10,6 +10,7 @@ from analysis import (
     analyze_layer_3,
     analyze_layer_4,
     analyze_layer_5,
+    analyze_device_performance,
     export_features
 )
 
@@ -180,12 +181,13 @@ def main():
         
         st.plotly_chart(fig, width="stretch")
         
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "Layer 1 (Synoptic)", 
             "Layer 2 (Waves)", 
             "Layer 3 (Atmosphere State)", 
             "Layer 4 (Micro)", 
-            "Layer 5 (Planetary)"
+            "Layer 5 (Planetary)",
+            "Đánh giá Thiết bị"
         ])
         
         with tab1:
@@ -395,6 +397,64 @@ def main():
             if 'Boss Amplitude Ratio' in metrics_l5:
                 st.info("💡 Tỷ lệ này cho phép dự đoán độ mạnh của dải áp cao/dòng xiết khu vực so với dữ liệu quá khứ.")
                 
+        with tab6:
+            st.header("6. Đánh giá Thiết bị & Độ tin cậy (Device Evaluation)")
+            st.write("Đánh giá chất lượng dữ liệu thu thập được từ thiết bị đo để xác định độ tin cậy của các phân tích vật lý.")
+            
+            with st.spinner("Đang phân tích độ tin cậy thiết bị..."):
+                metrics_device = analyze_device_performance(df_32hz, device_info)
+                
+            c1, c2, c3, c4 = st.columns(4)
+            
+            # Formulate reliability color
+            score = metrics_device['Reliability Score']
+            if score >= 90:
+                score_str = f"🟢 {score:.1f}% (Tuyệt vời)"
+            elif score >= 70:
+                score_str = f"🟡 {score:.1f}% (Khá)"
+            elif score >= 50:
+                score_str = f"🟠 {score:.1f}% (Trung bình)"
+            else:
+                score_str = f"🔴 {score:.1f}% (Kém)"
+                
+            c1.metric("Độ Tin Cậy Dữ Liệu", score_str)
+            c2.metric("Tỉ lệ Mất Dữ Liệu", f"{metrics_device['Data Missing Ratio (%)']:.4f}%")
+            c3.metric("Nhiễu Cao Tần (Std)", f"{metrics_device['Empirical Noise Std (hPa)']:.6f} hPa")
+            c4.metric("Độ Phân Giải Thực Tế", f"{metrics_device['Empirical Resolution (hPa)']:.6f} hPa")
+            
+            st.markdown("### Khuyến nghị Phân tích (Dựa trên thông số phần cứng)")
+            rec_html = "<ul>"
+            tol = device_info.get('Resolution', 0.01)
+            emp_noise = metrics_device['Empirical Noise Std (hPa)']
+            
+            if emp_noise < tol:
+                rec_html += f"<li>✅ Nhiễu môi trường ({emp_noise:.5f}) thấp hơn sai số lý thuyết của cảm biến ({tol}). Dữ liệu rất sạch.</li>"
+            else:
+                rec_html += f"<li>⚠️ Nhiễu môi trường ({emp_noise:.5f}) cao hơn sai số lý thuyết ({tol}). Các hiện tượng vi mô ở Layer 4 có thể bị lẫn nhiễu vật lý.</li>"
+                
+            if metrics_device['Data Missing Ratio (%)'] > 1.0:
+                rec_html += "<li>⚠️ Cảnh báo: Tỉ lệ mất gói tin khá cao, có thể ảnh hưởng đến kết quả biến đổi Fourier (Layer 2) và Entropy (Layer 3).</li>"
+            else:
+                rec_html += "<li>✅ Tính liên tục của chuỗi thời gian rất tốt, đảm bảo độ chính xác cho phân tích tần số (FFT).</li>"
+                
+            rec_html += "</ul>"
+            st.markdown(rec_html, unsafe_allow_html=True)
+            
+            # Plot High Frequency Noise
+            # To avoid huge UI lag, plot downsampled noise
+            df_noise = pd.DataFrame({'Datetime': df_32hz['Datetime'], 'Noise': metrics_device['Noise Signal']})
+            df_noise_plot = df_noise.iloc[::32] # downsample to 1Hz
+            
+            fig_noise = px.line(df_noise_plot, x='Datetime', y='Noise', title="Nhiễu phần cứng/môi trường > 16Hz (Đã Downsample 1Hz để hiển thị)", template="plotly_dark")
+            fig_noise.add_hline(y=tol, line_dash="dash", line_color="red", annotation_text="+ Tolearance")
+            fig_noise.add_hline(y=-tol, line_dash="dash", line_color="red", annotation_text="- Tolearance")
+            fig_noise.update_xaxes(title=None)
+            st.plotly_chart(fig_noise, width="stretch")
+            
+            # Hiển thị thông số phần cứng
+            st.markdown("### Thống số Phần cứng Gốc (Từ Hệ điều hành)")
+            st.json(device_info)
+
         # --- Export Features ---
         st.sidebar.markdown("---")
         if st.sidebar.button("Export Analysis Summary"):
