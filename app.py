@@ -263,6 +263,29 @@ def main():
             fig1.update_xaxes(title=None)
             st.plotly_chart(fig1, width="stretch")
             
+            # --- Residual Fluctuation centered at 0 ---
+            df_l1_plot['Residual Fluctuation (+/- hPa)'] = df_l1_plot['Residual Pressure (Synoptic Only)'] - df_l1_plot['Residual Pressure (Synoptic Only)'].mean()
+            
+            y_res = df_l1_plot['Residual Fluctuation (+/- hPa)']
+            import plotly.graph_objects as go
+            fig1_res = go.Figure()
+            
+            # Create masked arrays so filling doesn't cross the y=0 boundary incorrectly
+            pos_y = np.where(y_res >= 0, y_res, 0)
+            neg_y = np.where(y_res < 0, y_res, 0)
+            
+            fig1_res.add_trace(go.Scatter(x=df_l1_plot['Datetime'], y=pos_y, mode='lines', 
+                                          line=dict(color='#00ff00', width=1), fill='tozeroy', name='Bù (+)'))
+            fig1_res.add_trace(go.Scatter(x=df_l1_plot['Datetime'], y=neg_y, mode='lines', 
+                                          line=dict(color='#ff4b4b', width=1), fill='tozeroy', name='Trừ (-)'))
+                                          
+            fig1_res.update_layout(title="Độ bù trừ Áp suất Dư số (Residual Fluctuation ± hPa)", 
+                                   template="plotly_dark", showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
+            
+            fig1_res.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5, annotation_text="Baseline (0 hPa)")
+            fig1_res.update_xaxes(title=None)
+            st.plotly_chart(fig1_res, width="stretch")
+            
             fig2 = px.line(df_l1_plot, x='Datetime', y='dP/dt (hPa/hr)', title="Tốc độ biến thiên (dP/dt) (1 Phút Smoothed)", template="plotly_dark", render_mode="svg")
             fig2.update_traces(line_color='#00d4ff')
             fig2.update_xaxes(title=None)
