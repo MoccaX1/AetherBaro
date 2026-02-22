@@ -440,6 +440,30 @@ def main():
             rec_html += "</ul>"
             st.markdown(rec_html, unsafe_allow_html=True)
             
+            st.markdown("### Đánh giá Độ chính xác theo Dải Sóng (Layer 2 & 4)")
+            wave_rec_html = "<ul>"
+            emp_res = metrics_device['Empirical Resolution (hPa)']
+            limit = max(tol, emp_noise, emp_res)
+            
+            if limit <= 0.02:
+                wave_rec_html += "<li>✅ <b>Dải Vi mô (Micro - <10m):</b> Rất Tốt. Dữ liệu đủ sạch để quan sát nhiễu động nhiệt và gió giật (<0.02 hPa).</li>"
+            else:
+                wave_rec_html += f"<li>⚠️ <b>Dải Vi mô (Micro - <10m):</b> Kém chính xác. Nhiễu phần cứng ({limit:.3f} hPa) lớn hơn biên độ sóng vi mô thông thường.</li>"
+                
+            if limit <= 0.05:
+                wave_rec_html += "<li>✅ <b>Dải Child (35-45m):</b> Độ chính xác cao. Dễ dàng nhận diện các dao động áp suất cục bộ trung bình.</li>"
+            else:
+                wave_rec_html += f"<li>⚠️ <b>Dải Child (35-45m):</b> Có thể lẫn nhiễu. Giới hạn cảm biến ({limit:.3f} hPa) tiệm cận với biên độ sóng Child.</li>"
+                
+            if limit <= 0.2:
+                wave_rec_html += "<li>✅ <b>Dải Mother (75-85m):</b> Rất Tốt. Sóng ổn định định kỳ của bầu khí quyển hoàn toàn tin cậy.</li>"
+            else:
+                wave_rec_html += f"<li>⚠️ <b>Dải Mother (75-85m):</b> Cảnh báo độ chính xác bị suy giảm.</li>"
+                
+            wave_rec_html += "<li>✅ <b>Dải Boss (150-180m):</b> Hoàn toàn chính xác. Biên độ sóng Synoptic lớn (>0.5 hPa) dễ dàng vượt qua mọi giới hạn nhiễu phần cứng.</li>"
+            wave_rec_html += "</ul>"
+            st.markdown(wave_rec_html, unsafe_allow_html=True)
+            
             # Plot High Frequency Noise
             # To avoid huge UI lag, plot downsampled noise
             df_noise = pd.DataFrame({'Datetime': df_32hz['Datetime'], 'Noise': metrics_device['Noise Signal']})
