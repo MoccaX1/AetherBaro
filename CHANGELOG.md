@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.1] - 2026-02-22
+feat: support country in location.csv and update UI
+
 ## [1.1.0] - 2026-02-22
 ### Features
 - feat: Implement loading and utilization of location data for display and tidal analysis. ([#1b40452](https://github.com/user/repo/commit/1b404521d3369c03cd428ee4c026a8ea182b76a9))
