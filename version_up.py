@@ -19,15 +19,61 @@ def get_git_commits():
         last_hash = subprocess.run(last_commit_cmd, capture_output=True, text=True).stdout.strip()
         
         if not last_hash:
-            # Nếu chưa từng commit file VERSION, lấy tất cả commit
-            log_cmd = ["git", "log", "--pretty=format:- %s ([%h](https://github.com/user/repo/commit/%H))"]
+            log_cmd = ["git", "log", "--pretty=format:%s|%h|%H"]
         else:
-            # Lấy các commit từ hash đó tới HEAD
-            log_cmd = ["git", "log", f"{last_hash}..HEAD", "--pretty=format:- %s ([%h](https://github.com/user/repo/commit/%H))"]
+            log_cmd = ["git", "log", f"{last_hash}..HEAD", "--pretty=format:%s|%h|%H"]
             
         result = subprocess.run(log_cmd, capture_output=True, text=True).stdout.strip()
-        # Chuyển đổi link placeholder nếu bạn muốn (ở đây để mặc định)
-        return result if result else "- Minor updates and improvements."
+        if not result:
+            return "- Minor updates and improvements."
+
+        # Phân loại commit theo chuẩn Conventional Commits
+        categories = {
+            "Features": [],
+            "Bug Fixes": [],
+            "Performance": [],
+            "Refactor": [],
+            "Documentation": [],
+            "Chores": []
+        }
+        
+        others = []
+        
+        for line in result.split("\n"):
+            if not line.strip(): continue
+            msg, short_h, long_h = line.split("|")
+            link = f"([#{short_h}](https://github.com/user/repo/commit/{long_h}))"
+            
+            msg_lower = msg.lower()
+            if msg_lower.startswith("feat"):
+                categories["Features"].append(f"- {msg} {link}")
+            elif msg_lower.startswith("fix"):
+                categories["Bug Fixes"].append(f"- {msg} {link}")
+            elif msg_lower.startswith("perf"):
+                categories["Performance"].append(f"- {msg} {link}")
+            elif msg_lower.startswith("refactor"):
+                categories["Refactor"].append(f"- {msg} {link}")
+            elif msg_lower.startswith("doc"):
+                categories["Documentation"].append(f"- {msg} {link}")
+            elif msg_lower.startswith("chore"):
+                categories["Chores"].append(f"- {msg} {link}")
+            else:
+                others.append(f"- {msg} {link}")
+
+        # Xây dựng nội dung Markdown
+        output = []
+        for cat, items in categories.items():
+            if items:
+                output.append(f"### {cat}")
+                output.extend(items)
+                output.append("")
+        
+        if others:
+            if output: output.append("### Others")
+            output.extend(others)
+            output.append("")
+            
+        return "\n".join(output).strip()
     except Exception as e:
         return f"- No git commits found ({e})."
 
@@ -53,16 +99,8 @@ def update_changelog(old_v, new_v, message):
     date_str = datetime.now().strftime("%Y-%m-%d")
     header = f"## [{new_v}] - {date_str}\n"
     
-    # Đảm bảo format entry hợp lệ
-    lines = []
-    for line in message.split('\n'):
-        if line.strip():
-            if not line.startswith("- "):
-                lines.append(f"- {line.strip()}")
-            else:
-                lines.append(line.strip())
-    
-    entry = "\n".join(lines) + "\n\n"
+    # entry đã được format sẵn ở get_git_commits
+    entry = f"{message}\n\n"
     
     content = ""
     if os.path.exists(CHANGELOG_FILE):
@@ -72,7 +110,6 @@ def update_changelog(old_v, new_v, message):
     if "# Changelog" not in content:
         content = "# Changelog\n\nAll notable changes to this project will be documented in this file.\n\n" + content
     
-    # Chèn vào dưới phần giới thiệu đầu tiên
     title_marker = "documented in this file.\n\n"
     marker_pos = content.find(title_marker)
     if marker_pos != -1:
