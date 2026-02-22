@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.2] - 2026-02-22
+### Refactor
+- Refactor: Categorize git commits into Conventional Commits sections with Markdown headings and links for improved changelog generation. ([#aa3f87b](https://github.com/user/repo/commit/aa3f87bf30aa1f1c7972f38be02e9940649e8ea8))
+
 ## [1.0.1] - 2026-02-22
 - Minor updates and improvements.
 
