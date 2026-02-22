@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.5] - 2026-02-22
+### Refactor
+- refactor: Replace discrete peak annotations with continuous range highlighting for pressure tolerance zones. ([#295b972](https://github.com/user/repo/commit/295b972a1c8d6124c53ed5d018ebeb5ee6e23168))
+
+### Others
+- Merge branch 'main' of https://github.com/MoccaX1/Project ([#edbbcfb](https://github.com/user/repo/commit/edbbcfb9323c49164ed149bc94f2c1c61e727bd5))
+- Added Dev Container Folder ([#e925f78](https://github.com/user/repo/commit/e925f78da3f3a5ef2e5c48517832eac30fa6dd37))
+
 ## [1.1.4] - 2026-02-22
 ### Features
 - feat: Distinguish annotation methods for noisy actual pressure data and smooth theoretical tide data. ([#5749f4d](https://github.com/user/repo/commit/5749f4d725baa479be0e016116ecc80524d30a49))
