@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.3] - 2026-02-22
+### Features
+- feat: Add lunar date display to the overview header and refactor the dual calendar metric using the `lunardate` library. ([#da30548](https://github.com/user/repo/commit/da30548bbe423bbce37205614ee4df6b883f78d3))
+- feat: Integrate Skyfield for precise moon elevation calculations and enhance UI with lunar phase names and dual calendar dates. ([#09b3aac](https://github.com/user/repo/commit/09b3aacdeed29cad8ae074b7fa811dddaef40893))
+- feat: Add a new plot for Residual Fluctuation centered at 0, showing positive and negative deviations. ([#cdfc373](https://github.com/user/repo/commit/cdfc373933e1abeffd4d03ac2291983d9e20d113))
+
+### Refactor
+- refactor: Enhance date and moon phase metric display with improved formatting, new labels, moon emojis, and illumination percentage. ([#1d7e640](https://github.com/user/repo/commit/1d7e6401c735e6f2d21ccbd6b006d116b83f4139))
+
 ## [1.1.2] - 2026-02-22
 ### Features
 - feat: Display accuracy evaluation based on wave ranges (Layer 2 & 4) in device metrics. ([#3a29b3a](https://github.com/user/repo/commit/3a29b3ae2974995cf670928c39985ed8e3292201))
