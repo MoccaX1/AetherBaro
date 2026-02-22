@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.6] - 2026-02-22
+### Features
+- feat: Add descriptive help tooltips to various headers and metrics for enhanced user guidance. ([#d44af17](https://github.com/user/repo/commit/d44af1735ce9ae715d09972d27eae4121cb9cc9e))
+
 ## [1.1.5] - 2026-02-22
 ### Refactor
 - refactor: Replace discrete peak annotations with continuous range highlighting for pressure tolerance zones. ([#295b972](https://github.com/user/repo/commit/295b972a1c8d6124c53ed5d018ebeb5ee6e23168))
