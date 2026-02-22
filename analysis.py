@@ -96,6 +96,36 @@ def load_and_preprocess_data(folder_path, target_fs=1.0):
     return df_32hz, df_base
 
 # --- Layer 1: Synoptic & Tidal ---
+def get_lunar_phase_name(phase_days):
+    """
+    Classifies moon phase into 9 distinct Vietnamese types based on a 29.53-day cycle.
+    """
+    if phase_days < 0 or phase_days > 29.53:
+        return "Không xác định"
+    
+    # 29.53 days is roughly one synodic month
+    # Normalize to 0-360 degrees for easier thresholding based on average times
+    deg = (phase_days / 29.53) * 360
+    
+    if deg < 22.5: # 0 - 22.5
+        return "Trăng mới (Sóc)" # 1
+    elif deg < 67.5: # 22.5 - 67.5
+        return "Trăng non (Lưỡi liềm đầu tháng)" # 2
+    elif deg < 112.5: # 67.5 - 112.5
+        return "Trăng thượng huyền (Bán nguyệt đầu tháng)" # 3
+    elif deg < 157.5: # 112.5 - 157.5
+        return "Trăng khuyết đầu tháng (Trương huyền tròn dần)" # 4
+    elif deg < 202.5: # 157.5 - 202.5
+        return "Trăng tròn (Vọng/Rằm)" # 5
+    elif deg < 247.5: # 202.5 - 247.5
+        return "Trăng khuyết cuối tháng (Trương huyền khuyết dần)" # 6
+    elif deg < 292.5: # 247.5 - 292.5
+        return "Trăng hạ huyền (Bán nguyệt cuối tháng)" # 7
+    elif deg < 337.5: # 292.5 - 337.5
+        return "Trăng tàn (Lưỡi liềm cuối tháng)" # 8
+    else: # 337.5 - 360
+        return "Trăng tối (Không trăng)" # 9
+
 def analyze_layer_1(df_base, fs=1.0, location_data=None):
     df_res = df_base.copy()
     
@@ -163,6 +193,18 @@ def analyze_layer_1(df_base, fs=1.0, location_data=None):
     theoretic_sparse = []
     sol_elev_sparse = []
     m_phase_sparse = []
+    m_elev_sparse = []
+    
+    # Initialize Skyfield for high-precision lunar positions
+    try:
+        from skyfield.api import load, wgs84
+        ts = load.timescale()
+        eph = load('de421.bsp')
+        earth, moon = eph['earth'], eph['moon']
+        observer_loc = earth + wgs84.latlon(lat, lon, elevation_m=(10 if np.isnan(location_data.get('Elevation', 10)) else location_data.get('Elevation', 10)))
+        use_skyfield = True
+    except Exception:
+        use_skyfield = False
     
     for dt in sparse_dts:
         # tz-aware datetime required by astral
@@ -176,6 +218,18 @@ def analyze_layer_1(df_base, fs=1.0, location_data=None):
         m_phase = phase(dt_aware)
         m_phase_sparse.append(m_phase)
         
+        # Moon Elevation (degrees) via Skyfield
+        if use_skyfield:
+            t_sf = ts.from_datetime(dt_aware)
+            astrometric = observer_loc.at(t_sf).observe(moon)
+            alt, az, distance = astrometric.apparent().altaz()
+            m_elev = alt.degrees
+        else:
+            # Fallback mock if skyfield fails to load (e.g., no internet for de421.bsp)
+            m_elev = 0.0
+            
+        m_elev_sparse.append(m_elev)
+        
         # Time variables in days for harmonic formulas
         t_hours = dt_aware.hour + dt_aware.minute / 60.0 + dt_aware.second / 3600.0
         
@@ -184,10 +238,13 @@ def analyze_layer_1(df_base, fs=1.0, location_data=None):
         # S1 wave peaks roughly at 5 AM (minimum temperature)
         tide_s1 = amp_s1 * np.cos(2 * np.pi * (t_hours - 5) / 24)
         
-        # M2 wave follows lunar transit (approx 50 mins later each day, linked to phase)
-        # 1 lunar cycle = 29.53 days. 
-        lunar_hours = t_hours - (m_phase / 29.53) * 24
-        tide_m2 = amp_m2 * np.cos(2 * np.pi * (lunar_hours) / 12.42)
+        # M2 wave is driven by the gravitational pull of the moon.
+        # It peaks (high tide) when the moon transits the meridian (highest elevation)
+        # and also 12.42 hours later (on the opposite side of the earth, often lowest negative elevation).
+        # We model this roughly as peaking when |elevation| is maximum.
+        # Since Moon elevation goes from approx -90 to +90, cos(2 * zenith_angle) maps this:
+        zenith_angle_rad = np.radians(90.0 - m_elev)
+        tide_m2 = amp_m2 * np.cos(2 * zenith_angle_rad) # High tide when zenith is 0 or 180 (elev 90 or -90)
         
         # Total Theoretical Tide offset
         theoretic_sparse.append(tide_s1 + tide_s2 + tide_m2)
@@ -197,10 +254,12 @@ def analyze_layer_1(df_base, fs=1.0, location_data=None):
         theoretical_tides = np.interp(t_seconds, sparse_t, theoretic_sparse)
         solar_elevations = np.interp(t_seconds, sparse_t, sol_elev_sparse)
         moon_phases = np.interp(t_seconds, sparse_t, m_phase_sparse)
+        moon_elevations = np.interp(t_seconds, sparse_t, m_elev_sparse)
     elif len(sparse_t) == 1:
         theoretical_tides = np.full(len(t_seconds), theoretic_sparse[0])
         solar_elevations = np.full(len(t_seconds), sol_elev_sparse[0])
         moon_phases = np.full(len(t_seconds), m_phase_sparse[0])
+        moon_elevations = np.full(len(t_seconds), m_elev_sparse[0])
     # Standardize atmospheric tide vertically to match the intercept of the data
     tide_array = np.array(theoretical_tides)
     mean_pressure = np.mean(pressure_data)
@@ -213,12 +272,14 @@ def analyze_layer_1(df_base, fs=1.0, location_data=None):
     
     df_res['Solar Elevation (deg)'] = solar_elevations
     df_res['Moon Phase (days)'] = moon_phases
+    df_res['Moon Elevation (deg)'] = moon_elevations
     
     metrics = {
         'Synoptic Trend': 'Rising' if slope > 0 else 'Falling',
         'Max dP/dt': df_res['dP/dt (hPa/hr)'].max(),
         'Min dP/dt': df_res['dP/dt (hPa/hr)'].min(),
-        'Avg Moon Phase': np.mean(moon_phases)
+        'Avg Moon Phase': np.mean(moon_phases),
+        'Lunar Phase Name': get_lunar_phase_name(np.mean(moon_phases))
     }
     
     return df_res, metrics

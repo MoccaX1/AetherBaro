@@ -196,13 +196,26 @@ def main():
         with tab1:
             st.header("1. Động lực học Quy mô Lớn")
             df_l1, metrics_l1 = analyze_layer_1(df_base, fs=fs, location_data=location_info)
-            
-            c1, c2, c3, c4 = st.columns(4)
+            c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric("Synoptic Trend", metrics_l1['Synoptic Trend'])
             c2.metric("Max dP/dt", f"{metrics_l1['Max dP/dt']:.4f} hPa/hr")
             c3.metric("Min dP/dt", f"{metrics_l1['Min dP/dt']:.4f} hPa/hr")
-            c4.metric("Moon Phase", f"{metrics_l1.get('Avg Moon Phase', 0):.1f} days")
             
+            # Dual Calendar
+            try:
+                from lunarcalendar import Converter, Solar
+                s_date = df_base['Datetime'].iloc[0]
+                solar = Solar(s_date.year, s_date.month, s_date.day)
+                lunar = Converter.Solar2Lunar(solar)
+                date_str = f"Dương: {s_date.strftime('%d/%m/%Y')}\nÂm: {lunar.day}/{lunar.month}"
+            except Exception as e:
+                date_str = df_base['Datetime'].iloc[0].strftime('%d/%m/%Y')
+                
+            c4.metric("Thời gian (Dương/Âm)", date_str)
+            
+            phase_val = metrics_l1.get('Avg Moon Phase', 0)
+            phase_name = metrics_l1.get('Lunar Phase Name', 'Không rõ')
+            c5.metric("Pha Mặt Trăng", f"{phase_name} ({phase_val:.1f} ngày)")
             # --- Performance Boost for Plotly Rendering ---
             # Max 1Hz for visualization to prevent browser freezing on dense 32Hz data
             plot_step = int(max(1, fs))
@@ -296,12 +309,30 @@ def main():
             fig2_raw.update_xaxes(title=None)
             st.plotly_chart(fig2_raw, width="stretch")
             
-            # --- Astronomical Features Chart ---
-            fig_astro = px.line(df_l1_plot, x='Datetime', y=['Solar Elevation (deg)', 'Moon Phase (days)'],
-                               title="Thông số Thiên văn (Solar Elevation & Moon Phase)", template="plotly_dark", render_mode="svg")
-            fig_astro.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
+            # --- Astronomical Features Chart (Dual Axis) ---
+            from plotly.subplots import make_subplots
+            fig_astro = make_subplots(specs=[[{"secondary_y": True}]])
+            
+            fig_astro.add_trace(
+                go.Scatter(x=df_l1_plot['Datetime'], y=df_l1_plot['Solar Elevation (deg)'], name="Solar Elevation (deg)", mode='lines', line=dict(color='#ffaa00')),
+                secondary_y=False,
+            )
+            
+            fig_astro.add_trace(
+                go.Scatter(x=df_l1_plot['Datetime'], y=df_l1_plot['Moon Elevation (deg)'], name="Moon Elevation (deg)", mode='lines', line=dict(color='#00d4ff')),
+                secondary_y=True,
+            )
+            
+            fig_astro.update_layout(
+                title_text="Thông số Thiên văn Cốt lõi (Solar Elevation & Moon Elevation)",
+                template="plotly_dark",
+                legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title="")
+            )
+            
+            fig_astro.update_yaxes(title_text="<b>Solar Elevation</b> (Degrees)", secondary_y=False, color='#ffaa00')
+            fig_astro.update_yaxes(title_text="<b>Moon Elevation</b> (Degrees)", secondary_y=True, color='#00d4ff')
             fig_astro.update_xaxes(title=None)
-            # Put them on secondary y-axis or just rely on plotly autoscaling
+            
             st.plotly_chart(fig_astro, width="stretch")
             
         with tab2:
