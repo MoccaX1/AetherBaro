@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.4] - 2026-02-22
+### Features
+- feat: Distinguish annotation methods for noisy actual pressure data and smooth theoretical tide data. ([#5749f4d](https://github.com/user/repo/commit/5749f4d725baa479be0e016116ecc80524d30a49))
+
+### Refactor
+- refactor: simplify astronomical features chart by using Plotly Express and a single y-axis. ([#5d2f7eb](https://github.com/user/repo/commit/5d2f7eb26ef8b2964f70a60a12dbcddc2698684a))
+
 ## [1.1.3] - 2026-02-22
 ### Features
 - feat: Add lunar date display to the overview header and refactor the dual calendar metric using the `lunardate` library. ([#da30548](https://github.com/user/repo/commit/da30548bbe423bbce37205614ee4df6b883f78d3))
