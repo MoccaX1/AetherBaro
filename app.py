@@ -336,10 +336,24 @@ def main():
             c3.metric("Min Permutation Entropy", f"{metrics_l3['Min Entropy']:.4f}")
             
             fig3 = px.line(df_l3, x='Datetime', y='Permutation Entropy', title="Permutation Entropy (Rolling 10m)", template="plotly_dark")
+            
+            # Highlight NaN regions (Data Initialization / Corruption)
+            nan_mask = df_l3['Permutation Entropy'].isna()
+            if nan_mask.any():
+                start_nan = df_l3.loc[nan_mask, 'Datetime'].iloc[0]
+                end_nan = df_l3.loc[nan_mask, 'Datetime'].iloc[-1]
+                fig3.add_vrect(x0=start_nan, x1=end_nan, fillcolor="red", opacity=0.3, layer="below", line_width=0, 
+                               annotation_text="Dữ liệu Khởi tạo (NaN)", annotation_position="top left", annotation_font_color="red")
+            
             fig3.update_xaxes(title=None)
             st.plotly_chart(fig3, width="stretch")
             
             fig3b = px.line(df_l3, x='Datetime', y='Rolling Variance (10m)', title="Rolling Variance (Proxy for Turbulence)", template="plotly_dark")
+            
+            if nan_mask.any():
+                fig3b.add_vrect(x0=start_nan, x1=end_nan, fillcolor="red", opacity=0.3, layer="below", line_width=0, 
+                                annotation_text="Dữ liệu Khởi tạo (NaN)", annotation_position="top left", annotation_font_color="red")
+                                
             fig3b.update_xaxes(title=None)
             st.plotly_chart(fig3b, width="stretch")
             

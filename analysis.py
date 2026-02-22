@@ -418,10 +418,6 @@ def analyze_layer_3(df_base, fs=1.0):
     df_10s['Permutation Entropy'] = pe_values
     df_10s['Rolling Variance (10m)'] = df_10s['Pressure (hPa)'].rolling(pe_window).var()
     
-    # Backfill so that Plotly doesn't skip the first 10 mins of rendering for Layer 3 (which creates a zoomed gap visually compared to overview)
-    df_10s['Permutation Entropy'] = df_10s['Permutation Entropy'].bfill()
-    df_10s['Rolling Variance (10m)'] = df_10s['Rolling Variance (10m)'].bfill()
-    
     # Compute global spectral slope
     nperseg = int(min(1024 * fs, len(df_base)))
     freqs, power = welch(df_base['Pressure (hPa)'].values, fs=fs, nperseg=nperseg)
