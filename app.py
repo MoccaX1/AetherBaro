@@ -252,11 +252,15 @@ def main():
             fig1.update_xaxes(title=None)
             st.plotly_chart(fig1, width="stretch")
             
-            fig2 = px.line(df_l1_plot, x='Datetime', y=['Raw dP/dt (hPa/hr)', 'dP/dt (hPa/hr)'], title="Tốc độ biến thiên (dP/dt)", template="plotly_dark")
-            fig2.update_traces(opacity=0.4, selector=dict(name='Raw dP/dt (hPa/hr)'))
-            fig2.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
+            fig2 = px.line(df_l1_plot, x='Datetime', y='dP/dt (hPa/hr)', title="Tốc độ biến thiên (dP/dt) (1 Phút Smoothed)", template="plotly_dark")
+            fig2.update_traces(line_color='#00d4ff')
             fig2.update_xaxes(title=None)
             st.plotly_chart(fig2, width="stretch")
+            
+            fig2_raw = px.line(df_l1_plot, x='Datetime', y='Raw dP/dt (hPa/hr)', title="Tốc độ biến thiên (Raw dP/dt)", template="plotly_dark")
+            fig2_raw.update_traces(line_color='#ff4b4b', opacity=0.7)
+            fig2_raw.update_xaxes(title=None)
+            st.plotly_chart(fig2_raw, width="stretch")
             
             # --- Astronomical Features Chart ---
             fig_astro = px.line(df_l1_plot, x='Datetime', y=['Solar Elevation (deg)', 'Moon Phase (days)'],
