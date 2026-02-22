@@ -279,7 +279,7 @@ def main():
             fig1.add_scatter(x=df_l1_plot['Datetime'], y=y_max_tide, mode='lines+markers', line=dict(color='#ffaa00', width=12), marker=dict(size=2), opacity=0.4, showlegend=False)
             fig1.add_scatter(x=df_l1_plot['Datetime'], y=y_min_tide, mode='lines+markers', line=dict(color='#ffaa00', width=12), marker=dict(size=2), opacity=0.4, showlegend=False)
             
-            # Cluster text annotations (30 min gaps) to avoid browser freeze
+            # Cluster text annotations for noisy data (Actual Pressure)
             def annotate_clusters_l1(t_series, p_val, color, prefix, y_pos):
                 if t_series.empty: return
                 clusters = [t_series.iloc[0]]
@@ -291,10 +291,36 @@ def main():
                     fig1.add_vline(x=t_rep, line_width=1, line_dash="dot", line_color=color)
                     fig1.add_annotation(x=t_rep, y=0.0, yref="paper", yanchor="bottom", text=t_rep.strftime('%H:%M:%S'), showarrow=False, font=dict(color=color), xanchor="left")
 
+            # Range annotations for smooth data (Theoretical Tides)
+            def annotate_tide_ranges_l1(t_series, p_val, color, prefix, y_pos):
+                if t_series.empty: return
+                blocks = []
+                current_block = [t_series.iloc[0]]
+                for t in t_series.iloc[1:]:
+                    if (t - current_block[-1]).total_seconds() > 7200: # 2 hours gap = new peak/trough
+                        blocks.append((current_block[0], current_block[-1]))
+                        current_block = [t]
+                    else:
+                        current_block.append(t)
+                blocks.append((current_block[0], current_block[-1]))
+                
+                for t_start, t_end in blocks:
+                    t_mid = t_start + (t_end - t_start) / 2
+                    if (t_end - t_start).total_seconds() < 300: # Very short
+                        fig1.add_vline(x=t_mid, line_width=1, line_dash="dot", line_color=color)
+                        fig1.add_annotation(x=t_mid, y=p_val, text=f"{prefix}: {p_val:.2f}", showarrow=True, arrowhead=1, ax=0, ay=-30 if y_pos=='top' else 30, font=dict(color=color))
+                    else:
+                        fig1.add_vrect(x0=t_start, x1=t_end, fillcolor=color, opacity=0.15, layer="below", line_width=0)
+                        fig1.add_vline(x=t_start, line_width=1, line_dash="dash", line_color=color)
+                        fig1.add_vline(x=t_end, line_width=1, line_dash="dash", line_color=color)
+                        fig1.add_annotation(x=t_mid, y=p_val, text=f"{prefix} Zone: {p_val:.2f}", showarrow=True, arrowhead=1, ax=0, ay=-30 if y_pos=='top' else 30, font=dict(color=color))
+                        fig1.add_annotation(x=t_start, y=0.0, yref="paper", yanchor="bottom", text=t_start.strftime('%H:%M'), showarrow=False, font=dict(color=color), xanchor="right")
+                        fig1.add_annotation(x=t_end, y=0.0, yref="paper", yanchor="bottom", text=t_end.strftime('%H:%M'), showarrow=False, font=dict(color=color), xanchor="left")
+
             annotate_clusters_l1(t_max_l1_series, p_max_l1, '#ff4b4b', 'Pmax', 'top')
             annotate_clusters_l1(t_min_l1_series, p_min_l1, '#00d4ff', 'Pmin', 'top')
-            annotate_clusters_l1(t_max_tide_series, p_max_tide, '#ffaa00', 'Tide Max', 'top')
-            annotate_clusters_l1(t_min_tide_series, p_min_tide, '#ffaa00', 'Tide Min', 'top')
+            annotate_tide_ranges_l1(t_max_tide_series, p_max_tide, '#ffaa00', 'Tide Max', 'top')
+            annotate_tide_ranges_l1(t_min_tide_series, p_min_tide, '#ffaa00', 'Tide Min', 'top')
                 
             fig1.update_xaxes(title=None)
             st.plotly_chart(fig1, width="stretch")
