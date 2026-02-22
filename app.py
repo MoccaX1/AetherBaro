@@ -143,6 +143,18 @@ def main():
         st.sidebar.success(f"✅ Dữ liệu đã được tiền xử lý ({int(fs)}Hz)")
         
         st.write(f"### Tổng quan dữ liệu Gốc (Đã Resample {int(fs)}Hz cho hiệu năng)")
+        
+        # Calculate start/end and dual date for overview header
+        t_start = df_base['Datetime'].iloc[0]
+        t_end = df_base['Datetime'].iloc[-1]
+        try:
+            from lunardate import LunarDate
+            lunar = LunarDate.fromSolarDate(t_start.year, t_start.month, t_start.day)
+            overview_date_str = f"Ngày Dương: {t_start.strftime('%d/%m/%Y')} | Ngày Âm: {lunar.day:02d}/{lunar.month:02d}"
+        except Exception:
+            overview_date_str = f"Ngày: {t_start.strftime('%d/%m/%Y')}"
+            
+        st.caption(f"**Thời gian đo:** {overview_date_str} (Từ {t_start.strftime('%H:%M:%S')} đến {t_end.strftime('%H:%M:%S')})")
         st.caption(rf"**Thiết bị đo:** {device_info['Model']} | **Cảm biến Áp suất:** {device_info['Sensor']} | **Sai số phần cứng (Tolerance):** $\pm{tolerance}$ hPa")
         st.caption(f"**Vị trí đo:** {location_info['City']}, {location_info['Region']}, {location_info['Country']} ({location_info['Latitude']}, {location_info['Longitude']}) | **Múi giờ:** {location_info['Timezone']}")
         
@@ -203,15 +215,14 @@ def main():
             
             # Dual Calendar
             try:
-                from lunarcalendar import Converter, Solar
+                from lunardate import LunarDate
                 s_date = df_base['Datetime'].iloc[0]
-                solar = Solar(s_date.year, s_date.month, s_date.day)
-                lunar = Converter.Solar2Lunar(solar)
-                date_str = f"{s_date.strftime('%d/%m/%Y')} | {lunar.day}/{lunar.month} (ÂL)"
+                lunar = LunarDate.fromSolarDate(s_date.year, s_date.month, s_date.day)
+                date_str = f"{s_date.strftime('%d/%m')} | {lunar.day:02d}/{lunar.month:02d}"
             except Exception as e:
-                date_str = df_base['Datetime'].iloc[0].strftime('%d/%m/%Y')
+                date_str = df_base['Datetime'].iloc[0].strftime('%d/%m')
                 
-            c4.metric("Dương | Âm Lịch", date_str)
+            c4.metric("Âm Dương Lịch", f"{date_str}")
             
             phase_val = metrics_l1.get('Avg Moon Phase', 0)
             phase_name = metrics_l1.get('Lunar Phase Name', 'Không rõ')
