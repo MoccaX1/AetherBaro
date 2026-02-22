@@ -332,28 +332,17 @@ def main():
             fig2_raw.update_xaxes(title=None)
             st.plotly_chart(fig2_raw, width="stretch")
             
-            # --- Astronomical Features Chart (Dual Axis) ---
-            from plotly.subplots import make_subplots
-            fig_astro = make_subplots(specs=[[{"secondary_y": True}]])
+            # --- Astronomical Features Chart ---
+            fig_astro = px.line(df_l1_plot, x='Datetime', y=['Solar Elevation (deg)', 'Moon Elevation (deg)'],
+                               title="Thông số Thiên văn Cốt lõi", template="plotly_dark", render_mode="svg")
             
-            fig_astro.add_trace(
-                go.Scatter(x=df_l1_plot['Datetime'], y=df_l1_plot['Solar Elevation (deg)'], name="Solar Elevation (deg)", mode='lines', line=dict(color='#ffaa00')),
-                secondary_y=False,
-            )
+            fig_astro.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
             
-            fig_astro.add_trace(
-                go.Scatter(x=df_l1_plot['Datetime'], y=df_l1_plot['Moon Elevation (deg)'], name="Moon Elevation (deg)", mode='lines', line=dict(color='#00d4ff')),
-                secondary_y=True,
-            )
+            # Khôi phục màu vàng cho mặt trời và xanh cho mặt trăng
+            fig_astro.update_traces(selector=dict(name='Solar Elevation (deg)'), line_color='#ffaa00')
+            fig_astro.update_traces(selector=dict(name='Moon Elevation (deg)'), line_color='#00d4ff')
             
-            fig_astro.update_layout(
-                title_text="Thông số Thiên văn Cốt lõi (Solar Elevation & Moon Elevation)",
-                template="plotly_dark",
-                legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title="")
-            )
-            
-            fig_astro.update_yaxes(title_text="<b>Solar Elevation</b> (Degrees)", secondary_y=False, color='#ffaa00')
-            fig_astro.update_yaxes(title_text="<b>Moon Elevation</b> (Degrees)", secondary_y=True, color='#00d4ff')
+            fig_astro.update_yaxes(title_text="<b>Elevation</b> (Degrees)")
             fig_astro.update_xaxes(title=None)
             
             st.plotly_chart(fig_astro, width="stretch")
