@@ -207,15 +207,27 @@ def main():
                 s_date = df_base['Datetime'].iloc[0]
                 solar = Solar(s_date.year, s_date.month, s_date.day)
                 lunar = Converter.Solar2Lunar(solar)
-                date_str = f"Dương: {s_date.strftime('%d/%m/%Y')}\nÂm: {lunar.day}/{lunar.month}"
+                date_str = f"{s_date.strftime('%d/%m/%Y')} | {lunar.day}/{lunar.month} (ÂL)"
             except Exception as e:
                 date_str = df_base['Datetime'].iloc[0].strftime('%d/%m/%Y')
                 
-            c4.metric("Thời gian (Dương/Âm)", date_str)
+            c4.metric("Dương | Âm Lịch", date_str)
             
             phase_val = metrics_l1.get('Avg Moon Phase', 0)
             phase_name = metrics_l1.get('Lunar Phase Name', 'Không rõ')
-            c5.metric("Pha Mặt Trăng", f"{phase_name} ({phase_val:.1f} ngày)")
+            
+            # Map phase to emoji and illumination %
+            # 0=New, 7.38=First Quarter, 14.76=Full, 22.14=Last Quarter, 29.53=New
+            illumination = 50.0 * (1.0 - np.cos(2 * np.pi * phase_val / 29.53))
+            
+            emojis = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘", "🌑"]
+            idx = int(round((phase_val / 29.53) * 8)) % 8
+            moon_emoji = emojis[idx]
+            
+            # Shorten name if it contains parens to avoid UI clipping
+            short_name = phase_name.split(' (')[0] if '(' in phase_name else phase_name
+            
+            c5.metric(f"Mặt Trăng {moon_emoji}", f"{short_name} ({illumination:.0f}%)")
             # --- Performance Boost for Plotly Rendering ---
             # Max 1Hz for visualization to prevent browser freezing on dense 32Hz data
             plot_step = int(max(1, fs))
