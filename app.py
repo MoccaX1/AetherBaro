@@ -179,20 +179,36 @@ def main():
         fig.add_scatter(x=plot_df['Datetime'], y=y_max_ov, mode='lines+markers', line=dict(color='#ff4b4b', width=12), marker=dict(size=2), opacity=0.4, showlegend=False, name="Pmax Area")
         fig.add_scatter(x=plot_df['Datetime'], y=y_min_ov, mode='lines+markers', line=dict(color='#00d4ff', width=12), marker=dict(size=2), opacity=0.4, showlegend=False, name="Pmin Area")
         
-        # Add labels only for distinct peaks (separated by 30 mins) to prevent annotation lag
-        def annotate_clusters_overview(t_series, p_val, color, prefix, y_pos):
+        # Add range annotations for distinct peaks to highlight the tolerance zone
+        def annotate_ranges_overview(t_series, p_val, color, prefix, y_pos):
             if t_series.empty: return
-            clusters = [t_series.iloc[0]]
+            blocks = []
+            current_block = [t_series.iloc[0]]
             for t in t_series.iloc[1:]:
-                if (t - clusters[-1]).total_seconds() > 1800:
-                    clusters.append(t)
-            for t_rep in clusters:
-                fig.add_annotation(x=t_rep, y=p_val, text=f"{prefix}: {p_val:.2f}", showarrow=True, arrowhead=1, ax=0, ay=-30 if y_pos=='top' else 30, font=dict(color=color))
-                fig.add_vline(x=t_rep, line_width=1, line_dash="dot", line_color=color)
-                fig.add_annotation(x=t_rep, y=0.0, yref="paper", yanchor="bottom", text=t_rep.strftime('%H:%M:%S'), showarrow=False, font=dict(color=color), xanchor="left")
+                # If the gap between two consecutive points in the tolerance zone is > 5 minutes, 
+                # it means the pressure curve left the zone and came back. Break the block here.
+                if (t - current_block[-1]).total_seconds() > 300: 
+                    blocks.append((current_block[0], current_block[-1]))
+                    current_block = [t]
+                else:
+                    current_block.append(t)
+            blocks.append((current_block[0], current_block[-1]))
+            
+            for t_start, t_end in blocks:
+                t_mid = t_start + (t_end - t_start) / 2
+                if (t_end - t_start).total_seconds() < 300: # Very short
+                    fig.add_vline(x=t_mid, line_width=1, line_dash="dot", line_color=color)
+                    fig.add_annotation(x=t_mid, y=p_val, text=f"{prefix}: {p_val:.2f}", showarrow=True, arrowhead=1, ax=0, ay=-30 if y_pos=='top' else 30, font=dict(color=color))
+                else:
+                    fig.add_vrect(x0=t_start, x1=t_end, fillcolor=color, opacity=0.15, layer="below", line_width=0)
+                    fig.add_vline(x=t_start, line_width=1, line_dash="dash", line_color=color)
+                    fig.add_vline(x=t_end, line_width=1, line_dash="dash", line_color=color)
+                    fig.add_annotation(x=t_mid, y=p_val, text=f"{prefix} Zone: {p_val:.2f}", showarrow=True, arrowhead=1, ax=0, ay=-30 if y_pos=='top' else 30, font=dict(color=color))
+                    fig.add_annotation(x=t_start, y=0.0, yref="paper", yanchor="bottom", text=t_start.strftime('%H:%M'), showarrow=False, font=dict(color=color), xanchor="right")
+                    fig.add_annotation(x=t_end, y=0.0, yref="paper", yanchor="bottom", text=t_end.strftime('%H:%M'), showarrow=False, font=dict(color=color), xanchor="left")
 
-        annotate_clusters_overview(t_max_series, p_max_val, '#ff4b4b', 'Pmax', 'top')
-        annotate_clusters_overview(t_min_series, p_min_val, '#00d4ff', 'Pmin', 'top')
+        annotate_ranges_overview(t_max_series, p_max_val, '#ff4b4b', 'Pmax', 'top')
+        annotate_ranges_overview(t_min_series, p_min_val, '#00d4ff', 'Pmin', 'top')
         
         st.plotly_chart(fig, width="stretch")
         
@@ -279,25 +295,14 @@ def main():
             fig1.add_scatter(x=df_l1_plot['Datetime'], y=y_max_tide, mode='lines+markers', line=dict(color='#ffaa00', width=12), marker=dict(size=2), opacity=0.4, showlegend=False)
             fig1.add_scatter(x=df_l1_plot['Datetime'], y=y_min_tide, mode='lines+markers', line=dict(color='#ffaa00', width=12), marker=dict(size=2), opacity=0.4, showlegend=False)
             
-            # Cluster text annotations for noisy data (Actual Pressure)
-            def annotate_clusters_l1(t_series, p_val, color, prefix, y_pos):
-                if t_series.empty: return
-                clusters = [t_series.iloc[0]]
-                for t in t_series.iloc[1:]:
-                    if (t - clusters[-1]).total_seconds() > 1800:
-                        clusters.append(t)
-                for t_rep in clusters:
-                    fig1.add_annotation(x=t_rep, y=p_val, text=f"{prefix}: {p_val:.2f}", showarrow=True, arrowhead=1, ax=0, ay=-30 if y_pos=='top' else 30, font=dict(color=color))
-                    fig1.add_vline(x=t_rep, line_width=1, line_dash="dot", line_color=color)
-                    fig1.add_annotation(x=t_rep, y=0.0, yref="paper", yanchor="bottom", text=t_rep.strftime('%H:%M:%S'), showarrow=False, font=dict(color=color), xanchor="left")
-
             # Range annotations for smooth data (Theoretical Tides)
             def annotate_tide_ranges_l1(t_series, p_val, color, prefix, y_pos):
                 if t_series.empty: return
                 blocks = []
                 current_block = [t_series.iloc[0]]
                 for t in t_series.iloc[1:]:
-                    if (t - current_block[-1]).total_seconds() > 7200: # 2 hours gap = new peak/trough
+                    # For Actual pressure and smooth tides, if the curve leaves the tolerance band for > 15 minutes, split it.
+                    if (t - current_block[-1]).total_seconds() > 900: 
                         blocks.append((current_block[0], current_block[-1]))
                         current_block = [t]
                     else:
@@ -317,8 +322,11 @@ def main():
                         fig1.add_annotation(x=t_start, y=0.0, yref="paper", yanchor="bottom", text=t_start.strftime('%H:%M'), showarrow=False, font=dict(color=color), xanchor="right")
                         fig1.add_annotation(x=t_end, y=0.0, yref="paper", yanchor="bottom", text=t_end.strftime('%H:%M'), showarrow=False, font=dict(color=color), xanchor="left")
 
-            annotate_clusters_l1(t_max_l1_series, p_max_l1, '#ff4b4b', 'Pmax', 'top')
-            annotate_clusters_l1(t_min_l1_series, p_min_l1, '#00d4ff', 'Pmin', 'top')
+            # Range annotations for Actual Pressure
+            annotate_tide_ranges_l1(t_max_l1_series, p_max_l1, '#ff4b4b', 'Pmax', 'top')
+            annotate_tide_ranges_l1(t_min_l1_series, p_min_l1, '#00d4ff', 'Pmin', 'top')
+            
+            # Range annotations for smooth data (Theoretical Tides)
             annotate_tide_ranges_l1(t_max_tide_series, p_max_tide, '#ffaa00', 'Tide Max', 'top')
             annotate_tide_ranges_l1(t_min_tide_series, p_min_tide, '#ffaa00', 'Tide Min', 'top')
                 
