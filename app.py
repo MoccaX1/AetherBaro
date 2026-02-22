@@ -222,12 +222,12 @@ def main():
         ])
         
         with tab1:
-            st.header("1. Động lực học Quy mô Lớn")
+            st.header("1. Động lực học Quy mô Lớn", help="Nghiên cứu các biên độ áp suất khổng lồ, thay đổi chậm theo giờ/ngày do Bức xạ Mặt Trời (Thermal Tides), Trọng lực (Gravitational Tides), và các đợt Front lạnh/Áp thấp rộng hàng trăm km (Synoptic Scale).")
             df_l1, metrics_l1 = analyze_layer_1(df_base, fs=fs, location_data=location_info)
             c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("Synoptic Trend", metrics_l1['Synoptic Trend'])
-            c2.metric("Max dP/dt", f"{metrics_l1['Max dP/dt']:.4f} hPa/hr")
-            c3.metric("Min dP/dt", f"{metrics_l1['Min dP/dt']:.4f} hPa/hr")
+            c1.metric("Synoptic Trend", metrics_l1['Synoptic Trend'], help="Xu hướng tổng thể của quy mô lớn. Rising = Áp suất đang nhích dần lên (thường báo hiệu trời quang đãng, lạnh). Falling = Áp suất sụt giảm (chuẩn bị có mưa, bão hoặc không khí nóng nóng chảy lên).")
+            c2.metric("Max dP/dt", f"{metrics_l1['Max dP/dt']:.4f} hPa/hr", help="Tốc độ Tăng áp suất nhanh nhất (hPa/giờ). Thường xảy ra khi Front không khí lạnh đè ập xuống hoặc đang leo lên sườn đỉnh Thủy triều nhiệt.")
+            c3.metric("Min dP/dt", f"{metrics_l1['Min dP/dt']:.4f} hPa/hr", help="Tốc độ Giảm áp suất nhanh nhất (âm). Dấu hiệu đặc trưng khi rãnh áp thấp, bão đang tiến lại gần, vắt kiệt và hut không khí lên cao.")
             
             # Dual Calendar
             try:
@@ -238,7 +238,7 @@ def main():
             except Exception as e:
                 date_str = df_base['Datetime'].iloc[0].strftime('%d/%m')
                 
-            c4.metric("Âm Dương Lịch", f"{date_str}")
+            c4.metric("Âm Dương Lịch", f"{date_str}", help="Ngày bắt đầu file đo đạc được quy chiếu ra Âm Lịch Việt Nam để dùng chung với pha Mặt trăng.")
             
             phase_val = metrics_l1.get('Avg Moon Phase', 0)
             phase_name = metrics_l1.get('Lunar Phase Name', 'Không rõ')
@@ -254,7 +254,7 @@ def main():
             # Shorten name if it contains parens to avoid UI clipping
             short_name = phase_name.split(' (')[0] if '(' in phase_name else phase_name
             
-            c5.metric(f"Mặt Trăng {moon_emoji}", f"{short_name} ({illumination:.0f}%)")
+            c5.metric(f"Mặt Trăng {moon_emoji}", f"{short_name} ({illumination:.0f}%)", help="Thông số Trăng tính theo phương trình góc nhìn thiên văn. % là tỷ lệ bề mặt nhận được ánh sáng từ góc nhìn ngắm trên Trái Đất.")
             # --- Performance Boost for Plotly Rendering ---
             # Max 1Hz for visualization to prevent browser freezing on dense 32Hz data
             plot_step = int(max(1, fs))
@@ -382,7 +382,7 @@ def main():
             st.plotly_chart(fig_astro, width="stretch")
             
         with tab2:
-            st.header("2. Hệ thống Sóng (Boss/Mother/Child)")
+            st.header("2. Hệ thống Sóng (Boss/Mother/Child)", help="Dùng phân tích phổ biến đổi Fourier (FFT) và lưới lọc kỹ thuật số (Bandpass) để tách sóng áp suất khổng lồ thành nhiều dải Sóng Trọng trường vi mô (Gravity Waves) xếp chồng lên nhau do địa hình hoặc mây giông tạo ra.")
             filtered_signals, freqs, power, periods_min, power_valid, exact_peak_period, dynamic_bands = analyze_layer_2(df_base, fs=fs)
             
             df_waves = df_base[['Datetime']].copy()
@@ -437,14 +437,14 @@ def main():
             st.plotly_chart(fig_fft, width="stretch")
             
         with tab3:
-            st.header("3. Trạng thái Khí quyển (Atmosphere State)")
+            st.header("3. Trạng thái Khí quyển (Atmosphere State)", help="Khảo sát độ hỗn loạn (Turbulence) và độ tĩnh lặng của dòng chảy không khí. Càng hỗn loạn (Entropy cao) hệ thống khí quyển cành bất ổn định (có thể giông lốc).")
             with st.spinner("Đang tính Permutation Entropy..."):
                 df_l3, metrics_l3 = analyze_layer_3(df_base, fs=fs)
             
             c1, c2, c3 = st.columns(3)
-            c1.metric("Global Spectral Slope", f"{metrics_l3['Global Spectral Slope']:.4f}")
-            c2.metric("Max Permutation Entropy", f"{metrics_l3['Max Entropy']:.4f}")
-            c3.metric("Min Permutation Entropy", f"{metrics_l3['Min Entropy']:.4f}")
+            c1.metric("Global Spectral Slope", f"{metrics_l3['Global Spectral Slope']:.4f}", help="Hệ số góc phổ Kolmogorov. Ở quy mô Synoptic và Mesoscale gió, hệ số này thường quanh mốc -5/3 (-1.67) cho dòng chảy rối 3D (3D-Turbulence). Lớn hơn mức này (trần truồng, ví dụ -3) hệ thống tĩnh lại thành phân tầng 2D chuyên dẹt dọc theo bề mặt đất.")
+            c2.metric("Max Permutation Entropy", f"{metrics_l3['Max Entropy']:.4f}", help="Hệ số phân hóa thứ tự cao nhất (Chạy từ 0 đến 1). Giá trị đạt trên 0.95 thường báo hiệu sự thay đổi dữ dội phá vỡ mô hình dự đoán (cực kỳ rối).")
+            c3.metric("Min Permutation Entropy", f"{metrics_l3['Min Entropy']:.4f}", help="Trạng thái yên bình (Laminar Flow) nhất của khí quyển được ghi lại trong suốt chiều dài dữ liệu.")
             
             fig3 = px.line(df_l3, x='Datetime', y='Permutation Entropy', title="Permutation Entropy (Rolling 10m)", template="plotly_dark", render_mode="svg")
             
@@ -469,13 +469,13 @@ def main():
             st.plotly_chart(fig3b, width="stretch")
             
         with tab4:
-            st.header("4. Nhiễu động cục bộ & Micro-events (32Hz)")
+            st.header("4. Nhiễu động cục bộ & Micro-events (32Hz)", help="Khai thác dữ liệu đo với tần số quét siêu cao để tóm gọn các xung Microbaroms kéo dài chưa tới vài giây (Gió thốc giật, cánh quạt, cửa sập hoặc siêu tiếng ồn nhiệt động).")
             df_l4, metrics_l4 = analyze_layer_4(df_32hz)
             
             c1, c2, c3 = st.columns(3)
-            c1.metric("Max Gust Proxy (Std)", f"{metrics_l4['Max Gust Proxy']:.4f}")
-            c2.metric("Avg Gust Proxy", f"{metrics_l4['Avg Gust Proxy']:.4f}")
-            c3.metric("Pressure Skewness", f"{metrics_l4['Pressure Skewness']:.4f}")
+            c1.metric("Max Gust Proxy (Std)", f"{metrics_l4['Max Gust Proxy']:.4f}", help="Biên độ dao động áp suất cực vi mô bị làm rung lắc bởi Gió giật mạnh (Gust) va đập vào điểm đo. Giá trị cao nghĩa là gió rất hung bạo.")
+            c2.metric("Avg Gust Proxy", f"{metrics_l4['Avg Gust Proxy']:.4f}", help="Thể hiện sức gió nền liên tục (Ambient Wind turbulence) rít qua bề mặt thiết bị suốt buổi đo.")
+            c3.metric("Pressure Skewness", f"{metrics_l4['Pressure Skewness']:.4f}", help="Độ lệnh chuẩn phân bố. Nếu âm sâu (< -0.5), không khí thốc mạnh trồi lên cao (Updrafts) do bốc hơi hoặc bão. Nếu dương gắt (> 0.5), khối khí lạnh năng trên mây đang nén dập xuống đất (Downdrafts / Microburst).")
             
             # Subsample for rendering performance in browser (use 1Hz max gust to preserve peaks and connect points)
             df_l4_plot = df_l4.set_index('Datetime').resample('1s').max().reset_index().dropna(subset=['Gust Proxy (Rolling Std)'])
@@ -485,7 +485,7 @@ def main():
             st.plotly_chart(fig4, width="stretch")
             
         with tab5:
-            st.header("5. Kết nối Hành tinh & External Anchor")
+            st.header("5. Kết nối Hành tinh & External Anchor", help="Tìm kiếm sự đồng bộ của Sóng Khí quyển (Teleconnection) giữa các trạm đo cách xa nhau dọc theo hành tinh và căn chỉnh áp suất hệ quy chiếu chuẩn.")
             
             df_l2_baseline_waves = None
             if baseline_folder != "None":
@@ -498,16 +498,16 @@ def main():
             metrics_l5 = analyze_layer_5(pd.DataFrame(filtered_signals), df_l2_baseline_waves, external_mslp)
             
             c1, c2, c3 = st.columns(3)
-            c1.metric("Current Boss Amplitude", f"{metrics_l5.get('Boss Wave Amplitude (Current)', 0):.4f}")
+            c1.metric("Current Boss Amplitude", f"{metrics_l5.get('Boss Wave Amplitude (Current)', 0):.4f}", help="Biên độ thực tế của dòng sóng Boss (chu kỳ khổng lồ nhất) đang ngầm quét qua trạm đo của bạn.")
             if 'Boss Amplitude Ratio' in metrics_l5:
-                c2.metric("Boss vs Baseline Ratio", f"{metrics_l5['Boss Amplitude Ratio']:.2f}x")
-            c3.metric("MSLP Anchor", f"{metrics_l5.get('Current MSLP Ref', 0)}")
+                c2.metric("Boss vs Baseline Ratio", f"{metrics_l5['Boss Amplitude Ratio']:.2f}x", help="Tần suất sức mạnh của sóng Boss hiện hành so sánh với hồ sơ gốc (Baseline). Lớn hơn 1x nghĩa là bầu trời đang bị khuấy động mãnh liệt hơn quá khứ.")
+            c3.metric("MSLP Anchor", f"{metrics_l5.get('Current MSLP Ref', 0)}", help="Áp suất tham chiếu quy mặt nước biển chuẩn (Mean Sea Level Pressure) lấy từ nguồn METAR quốc tế để làm mỏ neo gỡ sai số.")
             
             if 'Boss Amplitude Ratio' in metrics_l5:
                 st.info("💡 Tỷ lệ này cho phép dự đoán độ mạnh của dải áp cao/dòng xiết khu vực so với dữ liệu quá khứ.")
                 
         with tab6:
-            st.header("6. Đánh giá Thiết bị & Độ tin cậy (Device Evaluation)")
+            st.header("6. Đánh giá Thiết bị & Độ tin cậy (Device Evaluation)", help="Phân tích cơ học lượng tử của dòng dữ liệu nhằm mổ xẻ chất lượng điện tử nội tại của bản thân con chip Cảm biến trước khi tin tưởng các chỉ số vật lý nó cung cấp.")
             st.write("Đánh giá chất lượng dữ liệu thu thập được từ thiết bị đo để xác định độ tin cậy của các phân tích vật lý.")
             
             with st.spinner("Đang phân tích độ tin cậy thiết bị..."):
@@ -526,10 +526,10 @@ def main():
             else:
                 score_str = f"🔴 {score:.1f}% (Kém)"
                 
-            c1.metric("Độ Tin Cậy Dữ Liệu", score_str)
-            c2.metric("Tỉ lệ Mất Dữ Liệu", f"{metrics_device['Data Missing Ratio (%)']:.4f}%")
-            c3.metric("Nhiễu Cao Tần (Std)", f"{metrics_device['Empirical Noise Std (hPa)']:.6f} hPa")
-            c4.metric("Độ Phân Giải Thực Tế", f"{metrics_device['Empirical Resolution (hPa)']:.6f} hPa")
+            c1.metric("Độ Tin Cậy Dữ Liệu", score_str, help="Điểm tổng thể quy đổi tử Tỷ lệ gián đoạn thông tin, mức độ dơ bẩn của dòng tín hiệu nhiễu cực đại và mật độ bước nhảy số.")
+            c2.metric("Tỉ lệ Mất Dữ Liệu", f"{metrics_device['Data Missing Ratio (%)']:.4f}%", help="Tỷ lệ những gói tin (Packets) bị bay màu trên đường truyền hoặc vi xử lý bị kẹt không lấy mẫu kịp khung giờ quy định.")
+            c3.metric("Nhiễu Cao Tần (Std)", f"{metrics_device['Empirical Noise Std (hPa)']:.6f} hPa", help="Độ lệch chuẩn của Sàn nhiễu trắng (White Noise Floor). Tín hiệu giả sinh ra do giao thoa điện từ trường và rung động nhiệt kế của điện dung nội tại cảm biến.")
+            c4.metric("Độ Phân Giải Thực Tế", f"{metrics_device['Empirical Resolution (hPa)']:.6f} hPa", help="Bước nhảy nhạy bén nhỏ nhất thực sự đo đếm được (Grid Resolution) ở ngoài môi trường thay vì con số lý tưởng trong phòng thí nghiệm của Apple/Bosch.")
             
             st.markdown("### Khuyến nghị Phân tích (Dựa trên thông số phần cứng)")
             rec_html = "<ul>"
