@@ -39,6 +39,12 @@ def load_device_info(folder_path):
             if not model_rows.empty:
                 info['Model'] = model_rows['value'].values[0]
                 
+            delay_rows = df[df['property'] == 'pressure MinDelay']
+            if not delay_rows.empty:
+                min_delay_us = float(delay_rows['value'].values[0])
+                if min_delay_us > 0:
+                    info['MaxFS'] = round(1000000.0 / min_delay_us)
+                
             vendor_rows = df[df['property'] == 'pressure Vendor']
             name_rows = df[df['property'] == 'pressure Name']
             vendor = vendor_rows['value'].values[0] if not vendor_rows.empty else ""
@@ -61,23 +67,37 @@ def main():
         
     selected_folder = st.sidebar.selectbox("Thư mục dữ liệu:", folders)
     
-    # --- Sampling Rate Option ---
-    st.sidebar.markdown("---")
-    resample_option = st.sidebar.selectbox(
-        "Tần số phân tích (Performance/Detail):", 
-        ["1Hz (Mặc định - Nhanh)", "5Hz (Chi tiết)", "32Hz (Bản gốc - Nặng)"]
-    )
-    
-    if "1Hz" in resample_option:
-        fs = 1.0
-    elif "5Hz" in resample_option:
-        fs = 5.0
-    else:
-        fs = 32.0
-    
     if selected_folder:
         folder_path = os.path.join(DATA_DIR, selected_folder)
         
+        # Load Device Info Early for Dynamic Sampling Rate
+        device_info = load_device_info(folder_path)
+        tolerance = device_info['Resolution']
+        max_fs = device_info.get('MaxFS', 32)
+        
+        # --- Sampling Rate Option ---
+        st.sidebar.markdown("---")
+        
+        # Dynamically build options
+        base_options = ["1Hz (Mặc định - Nhanh)", "5Hz (Chi tiết)"]
+        if max_fs > 5:
+            max_option = f"{max_fs}Hz (Bản gốc - Nặng)"
+            options = base_options + [max_option]
+        else:
+            options = base_options
+            
+        resample_option = st.sidebar.selectbox(
+            "Tần số phân tích (Performance/Detail):", 
+            options
+        )
+        
+        if "1Hz" in resample_option:
+            fs = 1.0
+        elif "5Hz" in resample_option:
+            fs = 5.0
+        else:
+            fs = float(max_fs)
+            
         try:
             df_32hz, df_base = get_processed_data(folder_path, fs)
         except Exception as e:
@@ -93,10 +113,6 @@ def main():
         external_mslp = st.sidebar.number_input("External MSLP (Trạm VVTS) - hPa", value=1010.0, step=0.1)
         
         st.sidebar.success(f"✅ Dữ liệu đã được tiền xử lý ({int(fs)}Hz)")
-        
-        # Load Device Info
-        device_info = load_device_info(folder_path)
-        tolerance = device_info['Resolution']
         
         st.write(f"### Tổng quan dữ liệu Gốc (Đã Resample {int(fs)}Hz cho hiệu năng)")
         st.caption(rf"**Thiết bị đo:** {device_info['Model']} | **Cảm biến Áp suất:** {device_info['Sensor']} | **Sai số phần cứng (Tolerance):** $\pm{tolerance}$ hPa")
