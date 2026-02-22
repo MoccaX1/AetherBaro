@@ -60,6 +60,7 @@ def load_location_info(folder_path):
     info = {
         'City': 'Ho Chi Minh City',
         'Region': 'Vietnam',
+        'Country': 'Vietnam',
         'Timezone': 'Asia/Ho_Chi_Minh',
         'Latitude': 10.7626,
         'Longitude': 106.6601
@@ -74,6 +75,7 @@ def load_location_info(folder_path):
                 elif 'timezone' in p: info['Timezone'] = str(val)
                 elif 'city' in p: info['City'] = str(val)
                 elif 'region' in p: info['Region'] = str(val)
+                elif 'country' in p: info['Country'] = str(val)
         except Exception:
             pass
     return info
@@ -141,7 +143,7 @@ def main():
         
         st.write(f"### Tổng quan dữ liệu Gốc (Đã Resample {int(fs)}Hz cho hiệu năng)")
         st.caption(rf"**Thiết bị đo:** {device_info['Model']} | **Cảm biến Áp suất:** {device_info['Sensor']} | **Sai số phần cứng (Tolerance):** $\pm{tolerance}$ hPa")
-        st.caption(f"**Vị trí đo:** {location_info['City']}, {location_info['Region']} ({location_info['Latitude']}, {location_info['Longitude']}) | **Múi giờ:** {location_info['Timezone']}")
+        st.caption(f"**Vị trí đo:** {location_info['City']}, {location_info['Region']}, {location_info['Country']} ({location_info['Latitude']}, {location_info['Longitude']}) | **Múi giờ:** {location_info['Timezone']}")
         
         # Plot downsampled if it's 32Hz to avoid massive browser lag
         plot_df = df_base.iloc[::int(max(1, fs))] if fs == 32.0 else df_base
