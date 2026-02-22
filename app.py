@@ -150,19 +150,22 @@ def main():
         plot_df = df_base.iloc[::int(max(1, fs))] if fs == 32.0 else df_base
         
         fig = px.line(plot_df, x='Datetime', y='Pressure (hPa)', title=f"Áp suất - {selected_folder} ({int(fs)}Hz Data)",
-                     template="plotly_dark")
+                     template="plotly_dark", render_mode="svg")
         fig.update_xaxes(title=None)
                      
         # Extract Min/Max with Dynamic Sensor Error Margin
         p_max_val = plot_df['Pressure (hPa)'].max()
         p_min_val = plot_df['Pressure (hPa)'].min()
         
-        t_max_series = plot_df[p_max_val - plot_df['Pressure (hPa)'] <= tolerance]['Datetime']
-        t_min_series = plot_df[plot_df['Pressure (hPa)'] - p_min_val <= tolerance]['Datetime']
+        y_max_ov = plot_df['Pressure (hPa)'].where((p_max_val - plot_df['Pressure (hPa)']) <= tolerance, np.nan)
+        y_min_ov = plot_df['Pressure (hPa)'].where((plot_df['Pressure (hPa)'] - p_min_val) <= tolerance, np.nan)
         
-        # Plot all points rapidly as a single scatter trace
-        fig.add_scatter(x=t_max_series, y=plot_df.loc[t_max_series.index, 'Pressure (hPa)'], mode='markers', marker=dict(color='#ff4b4b', size=8), showlegend=False, name="Pmax Area")
-        fig.add_scatter(x=t_min_series, y=plot_df.loc[t_min_series.index, 'Pressure (hPa)'], mode='markers', marker=dict(color='#00d4ff', size=8), showlegend=False, name="Pmin Area")
+        t_max_series = plot_df.loc[~y_max_ov.isna(), 'Datetime']
+        t_min_series = plot_df.loc[~y_min_ov.isna(), 'Datetime']
+        
+        # Plot as thick lines with tiny markers so opacity doesn't stack and ruin visibility in SVG
+        fig.add_scatter(x=plot_df['Datetime'], y=y_max_ov, mode='lines+markers', line=dict(color='#ff4b4b', width=12), marker=dict(size=2), opacity=0.4, showlegend=False, name="Pmax Area")
+        fig.add_scatter(x=plot_df['Datetime'], y=y_min_ov, mode='lines+markers', line=dict(color='#00d4ff', width=12), marker=dict(size=2), opacity=0.4, showlegend=False, name="Pmin Area")
         
         # Add labels only for distinct peaks (separated by 30 mins) to prevent annotation lag
         def annotate_clusters_overview(t_series, p_val, color, prefix, y_pos):
@@ -206,7 +209,7 @@ def main():
             df_l1_plot = df_l1.iloc[::plot_step] if fs > 1.0 else df_l1
             
             fig1 = px.line(df_l1_plot, x='Datetime', y=['Pressure (hPa)', 'Smoothed (1h)', 'Theoretical Tide (Solar+Lunar)', 'Residual Pressure (Synoptic Only)'], 
-                           title="Synoptic Trend & Atmospheric Tides", template="plotly_dark")
+                           title="Synoptic Trend & Atmospheric Tides", template="plotly_dark", render_mode="svg")
             
             # Make theoretical tide dashed for clarity
             fig1.update_traces(line=dict(dash='dash'), selector=dict(name='Theoretical Tide (Solar+Lunar)'))
@@ -218,21 +221,27 @@ def main():
             p_max_l1 = df_l1['Pressure (hPa)'].max()
             p_min_l1 = df_l1['Pressure (hPa)'].min()
             
-            t_max_l1_series = df_l1[p_max_l1 - df_l1['Pressure (hPa)'] <= tolerance]['Datetime']
-            t_min_l1_series = df_l1[df_l1['Pressure (hPa)'] - p_min_l1 <= tolerance]['Datetime']
+            y_max_l1 = df_l1_plot['Pressure (hPa)'].where((p_max_l1 - df_l1_plot['Pressure (hPa)']) <= tolerance, np.nan)
+            y_min_l1 = df_l1_plot['Pressure (hPa)'].where((df_l1_plot['Pressure (hPa)'] - p_min_l1) <= tolerance, np.nan)
             
-            # 2. Theoretical Tide Max/Min (We can use a slightly larger tolerance for tides if needed, but hardware tolerance is fine)
+            t_max_l1_series = df_l1_plot.loc[~y_max_l1.isna(), 'Datetime']
+            t_min_l1_series = df_l1_plot.loc[~y_min_l1.isna(), 'Datetime']
+            
+            # 2. Theoretical Tide Max/Min
             p_max_tide = df_l1['Theoretical Tide (Solar+Lunar)'].max()
             p_min_tide = df_l1['Theoretical Tide (Solar+Lunar)'].min()
             
-            t_max_tide_series = df_l1[p_max_tide - df_l1['Theoretical Tide (Solar+Lunar)'] <= tolerance]['Datetime']
-            t_min_tide_series = df_l1[df_l1['Theoretical Tide (Solar+Lunar)'] - p_min_tide <= tolerance]['Datetime']
+            y_max_tide = df_l1_plot['Theoretical Tide (Solar+Lunar)'].where((p_max_tide - df_l1_plot['Theoretical Tide (Solar+Lunar)']) <= tolerance, np.nan)
+            y_min_tide = df_l1_plot['Theoretical Tide (Solar+Lunar)'].where((df_l1_plot['Theoretical Tide (Solar+Lunar)'] - p_min_tide) <= tolerance, np.nan)
             
-            # Fast bulk scatter plotting
-            fig1.add_scatter(x=t_max_l1_series, y=df_l1.loc[t_max_l1_series.index, 'Pressure (hPa)'], mode='markers', marker=dict(color='#ff4b4b', size=8), showlegend=False)
-            fig1.add_scatter(x=t_min_l1_series, y=df_l1.loc[t_min_l1_series.index, 'Pressure (hPa)'], mode='markers', marker=dict(color='#00d4ff', size=8), showlegend=False)
-            fig1.add_scatter(x=t_max_tide_series, y=df_l1.loc[t_max_tide_series.index, 'Theoretical Tide (Solar+Lunar)'], mode='markers', marker=dict(color='#ffaa00', size=8), showlegend=False)
-            fig1.add_scatter(x=t_min_tide_series, y=df_l1.loc[t_min_tide_series.index, 'Theoretical Tide (Solar+Lunar)'], mode='markers', marker=dict(color='#ffaa00', size=8), showlegend=False)
+            t_max_tide_series = df_l1_plot.loc[~y_max_tide.isna(), 'Datetime']
+            t_min_tide_series = df_l1_plot.loc[~y_min_tide.isna(), 'Datetime']
+            
+            # Plot as thick lines with tiny markers so opacity doesn't stack in SVG
+            fig1.add_scatter(x=df_l1_plot['Datetime'], y=y_max_l1, mode='lines+markers', line=dict(color='#ff4b4b', width=12), marker=dict(size=2), opacity=0.4, showlegend=False)
+            fig1.add_scatter(x=df_l1_plot['Datetime'], y=y_min_l1, mode='lines+markers', line=dict(color='#00d4ff', width=12), marker=dict(size=2), opacity=0.4, showlegend=False)
+            fig1.add_scatter(x=df_l1_plot['Datetime'], y=y_max_tide, mode='lines+markers', line=dict(color='#ffaa00', width=12), marker=dict(size=2), opacity=0.4, showlegend=False)
+            fig1.add_scatter(x=df_l1_plot['Datetime'], y=y_min_tide, mode='lines+markers', line=dict(color='#ffaa00', width=12), marker=dict(size=2), opacity=0.4, showlegend=False)
             
             # Cluster text annotations (30 min gaps) to avoid browser freeze
             def annotate_clusters_l1(t_series, p_val, color, prefix, y_pos):
@@ -254,19 +263,19 @@ def main():
             fig1.update_xaxes(title=None)
             st.plotly_chart(fig1, width="stretch")
             
-            fig2 = px.line(df_l1_plot, x='Datetime', y='dP/dt (hPa/hr)', title="Tốc độ biến thiên (dP/dt) (1 Phút Smoothed)", template="plotly_dark")
+            fig2 = px.line(df_l1_plot, x='Datetime', y='dP/dt (hPa/hr)', title="Tốc độ biến thiên (dP/dt) (1 Phút Smoothed)", template="plotly_dark", render_mode="svg")
             fig2.update_traces(line_color='#00d4ff')
             fig2.update_xaxes(title=None)
             st.plotly_chart(fig2, width="stretch")
             
-            fig2_raw = px.line(df_l1_plot, x='Datetime', y='Raw dP/dt (hPa/hr)', title="Tốc độ biến thiên (Raw dP/dt)", template="plotly_dark")
+            fig2_raw = px.line(df_l1_plot, x='Datetime', y='Raw dP/dt (hPa/hr)', title="Tốc độ biến thiên (Raw dP/dt)", template="plotly_dark", render_mode="svg")
             fig2_raw.update_traces(line_color='#ff4b4b', opacity=0.7)
             fig2_raw.update_xaxes(title=None)
             st.plotly_chart(fig2_raw, width="stretch")
             
             # --- Astronomical Features Chart ---
             fig_astro = px.line(df_l1_plot, x='Datetime', y=['Solar Elevation (deg)', 'Moon Phase (days)'],
-                               title="Thông số Thiên văn (Solar Elevation & Moon Phase)", template="plotly_dark")
+                               title="Thông số Thiên văn (Solar Elevation & Moon Phase)", template="plotly_dark", render_mode="svg")
             fig_astro.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
             fig_astro.update_xaxes(title=None)
             # Put them on secondary y-axis or just rely on plotly autoscaling
@@ -287,21 +296,21 @@ def main():
             
             # 1. Combined Plot (All Waves)
             fig_waves_combined = px.line(df_waves_plot, x='Datetime', y=list(filtered_signals.keys()), 
-                                         title="Tất cả Dải Sóng Kết Hợp (Macro + Micro)", template="plotly_dark")
+                                         title="Tất cả Dải Sóng Kết Hợp (Macro + Micro)", template="plotly_dark", render_mode="svg")
             fig_waves_combined.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
             fig_waves_combined.update_xaxes(title=None)
             st.plotly_chart(fig_waves_combined, width="stretch")
                 
             # 2. Separated Macro Waves
             fig_waves = px.line(df_waves_plot, x='Datetime', y=macro_cols, 
-                                title="Các Dải Sóng Dài (Boss/Mother/Child - Vĩ mô)", template="plotly_dark")
+                                title="Các Dải Sóng Dài (Boss/Mother/Child - Vĩ mô)", template="plotly_dark", render_mode="svg")
             fig_waves.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
             fig_waves.update_xaxes(title=None)
             st.plotly_chart(fig_waves, width="stretch")
             
             if micro_cols:
                 fig_micro = px.line(df_waves_plot, x='Datetime', y=micro_cols, 
-                                    title="Dải Sóng Ngắn (Micro - Nhiễu động nhiệt)", template="plotly_dark", color_discrete_sequence=['#ffaa00'])
+                                    title="Dải Sóng Ngắn (Micro - Nhiễu động nhiệt)", template="plotly_dark", render_mode="svg", color_discrete_sequence=['#ffaa00'])
                 fig_micro.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
                 fig_micro.update_xaxes(title=None)
                 st.plotly_chart(fig_micro, width="stretch")
@@ -310,7 +319,7 @@ def main():
             df_fft = df_fft[(df_fft['Period (minutes)'] >= 10) & (df_fft['Period (minutes)'] <= 300)]
             
             fig_fft = px.line(df_fft, x='Period (minutes)', y='Power', log_y=True, 
-                              title="Phổ năng lượng (Zero-padded FFT)", template="plotly_dark")
+                              title="Phổ năng lượng (Zero-padded FFT)", template="plotly_dark", render_mode="svg")
             
             # Draw dynamic bands
             color_map = {'Boss': 'red', 'Mother': 'green', 'Child': 'blue', 'Micro': 'orange', 'Wildcard': 'purple'}
@@ -337,7 +346,7 @@ def main():
             c2.metric("Max Permutation Entropy", f"{metrics_l3['Max Entropy']:.4f}")
             c3.metric("Min Permutation Entropy", f"{metrics_l3['Min Entropy']:.4f}")
             
-            fig3 = px.line(df_l3, x='Datetime', y='Permutation Entropy', title="Permutation Entropy (Rolling 10m)", template="plotly_dark")
+            fig3 = px.line(df_l3, x='Datetime', y='Permutation Entropy', title="Permutation Entropy (Rolling 10m)", template="plotly_dark", render_mode="svg")
             
             # Highlight NaN regions (Data Initialization / Corruption)
             nan_mask = df_l3['Permutation Entropy'].isna()
@@ -350,7 +359,7 @@ def main():
             fig3.update_xaxes(title=None)
             st.plotly_chart(fig3, width="stretch")
             
-            fig3b = px.line(df_l3, x='Datetime', y='Rolling Variance (10m)', title="Rolling Variance (Proxy for Turbulence)", template="plotly_dark")
+            fig3b = px.line(df_l3, x='Datetime', y='Rolling Variance (10m)', title="Rolling Variance (Proxy for Turbulence)", template="plotly_dark", render_mode="svg")
             
             if nan_mask.any():
                 fig3b.add_vrect(x0=start_nan, x1=end_nan, fillcolor="red", opacity=0.3, layer="below", line_width=0, 
@@ -371,7 +380,7 @@ def main():
             # Subsample for rendering performance in browser (use 1Hz max gust to preserve peaks and connect points)
             df_l4_plot = df_l4.set_index('Datetime').resample('1s').max().reset_index().dropna(subset=['Gust Proxy (Rolling Std)'])
             
-            fig4 = px.line(df_l4_plot, x='Datetime', y='Gust Proxy (Rolling Std)', title="Max Gust Proxy (1s Downsampled for plotting)", template="plotly_dark")
+            fig4 = px.line(df_l4_plot, x='Datetime', y='Gust Proxy (Rolling Std)', title="Max Gust Proxy (1s Downsampled for plotting)", template="plotly_dark", render_mode="svg")
             fig4.update_xaxes(title=None)
             st.plotly_chart(fig4, width="stretch")
             
@@ -469,7 +478,7 @@ def main():
             df_noise = pd.DataFrame({'Datetime': df_32hz['Datetime'], 'Noise': metrics_device['Noise Signal']})
             df_noise_plot = df_noise.iloc[::32] # downsample to 1Hz
             
-            fig_noise = px.line(df_noise_plot, x='Datetime', y='Noise', title="Nhiễu phần cứng/môi trường > 16Hz (Đã Downsample 1Hz để hiển thị)", template="plotly_dark")
+            fig_noise = px.line(df_noise_plot, x='Datetime', y='Noise', title="Nhiễu phần cứng/môi trường > 16Hz (Đã Downsample 1Hz để hiển thị)", template="plotly_dark", render_mode="svg")
             fig_noise.add_hline(y=tol, line_dash="dash", line_color="red", annotation_text="+ Tolearance")
             fig_noise.add_hline(y=-tol, line_dash="dash", line_color="red", annotation_text="- Tolearance")
             fig_noise.update_xaxes(title=None)
