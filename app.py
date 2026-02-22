@@ -55,6 +55,29 @@ def load_device_info(folder_path):
             pass
     return info
 
+def load_location_info(folder_path):
+    loc_path = os.path.join(folder_path, "meta", "location.csv")
+    info = {
+        'City': 'Ho Chi Minh City',
+        'Region': 'Vietnam',
+        'Timezone': 'Asia/Ho_Chi_Minh',
+        'Latitude': 10.7626,
+        'Longitude': 106.6601
+    }
+    if os.path.exists(loc_path):
+        try:
+            df = pd.read_csv(loc_path)
+            for prop, val in zip(df['property'], df['value']):
+                p = prop.lower().strip()
+                if 'lat' in p: info['Latitude'] = float(val)
+                elif 'lon' in p: info['Longitude'] = float(val)
+                elif 'timezone' in p: info['Timezone'] = str(val)
+                elif 'city' in p: info['City'] = str(val)
+                elif 'region' in p: info['Region'] = str(val)
+        except Exception:
+            pass
+    return info
+
 def main():
     st.sidebar.header("Chọn Dữ Liệu")
     
@@ -70,8 +93,10 @@ def main():
     if selected_folder:
         folder_path = os.path.join(DATA_DIR, selected_folder)
         
-        # Load Device Info Early for Dynamic Sampling Rate
+        # Load Device & Location Info
         device_info = load_device_info(folder_path)
+        location_info = load_location_info(folder_path)
+        
         tolerance = device_info['Resolution']
         max_fs = device_info.get('MaxFS', 32)
         
@@ -116,6 +141,7 @@ def main():
         
         st.write(f"### Tổng quan dữ liệu Gốc (Đã Resample {int(fs)}Hz cho hiệu năng)")
         st.caption(rf"**Thiết bị đo:** {device_info['Model']} | **Cảm biến Áp suất:** {device_info['Sensor']} | **Sai số phần cứng (Tolerance):** $\pm{tolerance}$ hPa")
+        st.caption(f"**Vị trí đo:** {location_info['City']}, {location_info['Region']} ({location_info['Latitude']}, {location_info['Longitude']}) | **Múi giờ:** {location_info['Timezone']}")
         
         # Plot downsampled if it's 32Hz to avoid massive browser lag
         plot_df = df_base.iloc[::int(max(1, fs))] if fs == 32.0 else df_base
@@ -162,7 +188,7 @@ def main():
         
         with tab1:
             st.header("1. Động lực học Quy mô Lớn")
-            df_l1, metrics_l1 = analyze_layer_1(df_base, fs=fs)
+            df_l1, metrics_l1 = analyze_layer_1(df_base, fs=fs, location_data=location_info)
             
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Synoptic Trend", metrics_l1['Synoptic Trend'])

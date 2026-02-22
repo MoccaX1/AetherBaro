@@ -96,9 +96,23 @@ def load_and_preprocess_data(folder_path, target_fs=1.0):
     return df_32hz, df_base
 
 # --- Layer 1: Synoptic & Tidal ---
-def analyze_layer_1(df_base, fs=1.0):
+def analyze_layer_1(df_base, fs=1.0, location_data=None):
     df_res = df_base.copy()
     
+    # Default coordinates (HCMC) if no data provided
+    lat = 10.7626
+    lon = 106.6601
+    tz = "Asia/Ho_Chi_Minh"
+    city = "Ho Chi Minh City"
+    region = "Vietnam"
+    
+    if location_data:
+        lat = location_data.get('Latitude', lat)
+        lon = location_data.get('Longitude', lon)
+        tz = location_data.get('Timezone', tz)
+        city = location_data.get('City', city)
+        region = location_data.get('Region', region)
+
     # 1. We use Gaussian Filter for mathematically smooth low-pass filtering and derivatives.
     pressure_data = df_res['Pressure (hPa)'].interpolate(method='linear').bfill().ffill().values
     
@@ -119,8 +133,7 @@ def analyze_layer_1(df_base, fs=1.0):
     df_res['Linear Trend'] = slope * x + intercept
     
     # 2. Astronomical Tides (Solar & Lunar)
-    # Vietnam Location: Latitude ~10.76 (HCMC/Tan An), Longitude ~106.66
-    loc = LocationInfo("Vietnam", "Vietnam", "Asia/Ho_Chi_Minh", 10.7626, 106.6601)
+    loc = LocationInfo(city, region, tz, lat, lon)
     
     # S1 (diurnal solar), S2 (semidiurnal solar), M2 (semidiurnal lunar)
     # Amplitudes are approximate for tropical latitudes (in hPa)
