@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.7] - 2026-02-23
+### Features
+- feat: Display total measurement duration in the overview and extend tide range block annotations to wave and entropy plots. ([#f251286](https://github.com/user/repo/commit/f2512867e014f7132e4dee31107714c0d41ece0b))
+- feat: Add new pressure sample data files including location, time, device, and raw data, and update .gitignore to include the new directory. ([#6ba7bfc](https://github.com/user/repo/commit/6ba7bfc1e760345caa06061c2701483977e73408))
+
 ## [1.1.6] - 2026-02-22
 ### Features
 - feat: Add descriptive help tooltips to various headers and metrics for enhanced user guidance. ([#d44af17](https://github.com/user/repo/commit/d44af1735ce9ae715d09972d27eae4121cb9cc9e))
