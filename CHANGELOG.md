@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.8] - 2026-02-23
+### Bug Fixes
+- fix: Dynamically set data directory path for cross-platform compatibility and add an existence check with an error message. ([#0a7c46a](https://github.com/user/repo/commit/0a7c46a1e0e35a5cc7d4be990e51838169208964))
+
+### Documentation
+- docs: update README documentation ([#7175c9b](https://github.com/user/repo/commit/7175c9b8b30061fadd2092dba4b0b4082684d247))
+
+### Chores
+- chore: update project dependencies in requirements.txt ([#634019c](https://github.com/user/repo/commit/634019c9886db63b9ac8a72686e3cfdadc7bed52))
+
 ## [1.1.7] - 2026-02-23
 ### Features
 - feat: Display total measurement duration in the overview and extend tide range block annotations to wave and entropy plots. ([#f251286](https://github.com/user/repo/commit/f2512867e014f7132e4dee31107714c0d41ece0b))
