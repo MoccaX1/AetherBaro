@@ -154,7 +154,12 @@ def main():
         except Exception:
             overview_date_str = f"Ngày: {t_start.strftime('%d/%m/%Y')}"
             
-        st.caption(f"**Thời gian đo:** {overview_date_str} (Từ {t_start.strftime('%H:%M:%S')} đến {t_end.strftime('%H:%M:%S')})")
+        duration = t_end - t_start
+        hours, remainder = divmod(int(duration.total_seconds()), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        duration_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        
+        st.caption(f"**Thời gian đo:** {overview_date_str} (Từ {t_start.strftime('%H:%M:%S')} đến {t_end.strftime('%H:%M:%S')}). **Tổng thời gian:** {duration_str}")
         st.caption(rf"**Thiết bị đo:** {device_info['Model']} | **Cảm biến Áp suất:** {device_info['Sensor']} | **Sai số phần cứng (Tolerance):** $\pm{tolerance}$ hPa")
         st.caption(f"**Vị trí đo:** {location_info['City']}, {location_info['Region']}, {location_info['Country']} ({location_info['Latitude']}, {location_info['Longitude']}) | **Múi giờ:** {location_info['Timezone']}")
         
@@ -296,39 +301,45 @@ def main():
             fig1.add_scatter(x=df_l1_plot['Datetime'], y=y_min_tide, mode='lines+markers', line=dict(color='#ffaa00', width=12), marker=dict(size=2), opacity=0.4, showlegend=False)
             
             # Range annotations for smooth data (Theoretical Tides)
-            def annotate_tide_ranges_l1(t_series, p_val, color, prefix, y_pos):
-                if t_series.empty: return
+            def get_tide_blocks_l1(t_series):
+                if t_series.empty: return []
                 blocks = []
                 current_block = [t_series.iloc[0]]
                 for t in t_series.iloc[1:]:
-                    # For Actual pressure and smooth tides, if the curve leaves the tolerance band for > 15 minutes, split it.
                     if (t - current_block[-1]).total_seconds() > 900: 
                         blocks.append((current_block[0], current_block[-1]))
                         current_block = [t]
                     else:
                         current_block.append(t)
                 blocks.append((current_block[0], current_block[-1]))
+                return blocks
                 
+            def draw_tide_blocks(fig, blocks, p_val, color, prefix, y_pos):
                 for t_start, t_end in blocks:
                     t_mid = t_start + (t_end - t_start) / 2
                     if (t_end - t_start).total_seconds() < 300: # Very short
-                        fig1.add_vline(x=t_mid, line_width=1, line_dash="dot", line_color=color)
-                        fig1.add_annotation(x=t_mid, y=p_val, text=f"{prefix}: {p_val:.2f}", showarrow=True, arrowhead=1, ax=0, ay=-30 if y_pos=='top' else 30, font=dict(color=color))
+                        fig.add_vline(x=t_mid, line_width=1, line_dash="dot", line_color=color)
+                        if p_val is not None:
+                            fig.add_annotation(x=t_mid, y=p_val, text=f"{prefix}: {p_val:.2f}", showarrow=True, arrowhead=1, ax=0, ay=-30 if y_pos=='top' else 30, font=dict(color=color))
                     else:
-                        fig1.add_vrect(x0=t_start, x1=t_end, fillcolor=color, opacity=0.15, layer="below", line_width=0)
-                        fig1.add_vline(x=t_start, line_width=1, line_dash="dash", line_color=color)
-                        fig1.add_vline(x=t_end, line_width=1, line_dash="dash", line_color=color)
-                        fig1.add_annotation(x=t_mid, y=p_val, text=f"{prefix} Zone: {p_val:.2f}", showarrow=True, arrowhead=1, ax=0, ay=-30 if y_pos=='top' else 30, font=dict(color=color))
-                        fig1.add_annotation(x=t_start, y=0.0, yref="paper", yanchor="bottom", text=t_start.strftime('%H:%M'), showarrow=False, font=dict(color=color), xanchor="right")
-                        fig1.add_annotation(x=t_end, y=0.0, yref="paper", yanchor="bottom", text=t_end.strftime('%H:%M'), showarrow=False, font=dict(color=color), xanchor="left")
+                        fig.add_vrect(x0=t_start, x1=t_end, fillcolor=color, opacity=0.15, layer="below", line_width=0)
+                        fig.add_vline(x=t_start, line_width=1, line_dash="dash", line_color=color)
+                        fig.add_vline(x=t_end, line_width=1, line_dash="dash", line_color=color)
+                        if p_val is not None:
+                            fig.add_annotation(x=t_mid, y=p_val, text=f"{prefix} Zone: {p_val:.2f}", showarrow=True, arrowhead=1, ax=0, ay=-30 if y_pos=='top' else 30, font=dict(color=color))
+                        fig.add_annotation(x=t_start, y=0.0, yref="paper", yanchor="bottom", text=t_start.strftime('%H:%M'), showarrow=False, font=dict(color=color), xanchor="right")
+                        fig.add_annotation(x=t_end, y=0.0, yref="paper", yanchor="bottom", text=t_end.strftime('%H:%M'), showarrow=False, font=dict(color=color), xanchor="left")
 
-            # Range annotations for Actual Pressure
-            annotate_tide_ranges_l1(t_max_l1_series, p_max_l1, '#ff4b4b', 'Pmax', 'top')
-            annotate_tide_ranges_l1(t_min_l1_series, p_min_l1, '#00d4ff', 'Pmin', 'top')
+            l1_max_blocks = get_tide_blocks_l1(t_max_l1_series)
+            l1_min_blocks = get_tide_blocks_l1(t_min_l1_series)
+            tide_max_blocks = get_tide_blocks_l1(t_max_tide_series)
+            tide_min_blocks = get_tide_blocks_l1(t_min_tide_series)
             
-            # Range annotations for smooth data (Theoretical Tides)
-            annotate_tide_ranges_l1(t_max_tide_series, p_max_tide, '#ffaa00', 'Tide Max', 'top')
-            annotate_tide_ranges_l1(t_min_tide_series, p_min_tide, '#ffaa00', 'Tide Min', 'top')
+            # Draw on Layer 1
+            draw_tide_blocks(fig1, l1_max_blocks, p_max_l1, '#ff4b4b', 'Pmax', 'top')
+            draw_tide_blocks(fig1, l1_min_blocks, p_min_l1, '#00d4ff', 'Pmin', 'top')
+            draw_tide_blocks(fig1, tide_max_blocks, p_max_tide, '#ffaa00', 'Tide Max', 'top')
+            draw_tide_blocks(fig1, tide_min_blocks, p_min_tide, '#ffaa00', 'Tide Min', 'top')
                 
             fig1.update_xaxes(title=None)
             st.plotly_chart(fig1, width="stretch")
@@ -398,6 +409,10 @@ def main():
             fig_waves_combined = px.line(df_waves_plot, x='Datetime', y=list(filtered_signals.keys()), 
                                          title="Tất cả Dải Sóng Kết Hợp (Macro + Micro)", template="plotly_dark", render_mode="svg")
             fig_waves_combined.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
+            draw_tide_blocks(fig_waves_combined, l1_max_blocks, None, '#ff4b4b', 'Pmax', 'top')
+            draw_tide_blocks(fig_waves_combined, l1_min_blocks, None, '#00d4ff', 'Pmin', 'top')
+            draw_tide_blocks(fig_waves_combined, tide_max_blocks, None, '#ffaa00', 'Tide Max', 'top')
+            draw_tide_blocks(fig_waves_combined, tide_min_blocks, None, '#ffaa00', 'Tide Min', 'top')
             fig_waves_combined.update_xaxes(title=None)
             st.plotly_chart(fig_waves_combined, width="stretch")
                 
@@ -405,6 +420,10 @@ def main():
             fig_waves = px.line(df_waves_plot, x='Datetime', y=macro_cols, 
                                 title="Các Dải Sóng Dài (Boss/Mother/Child - Vĩ mô)", template="plotly_dark", render_mode="svg")
             fig_waves.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
+            draw_tide_blocks(fig_waves, l1_max_blocks, None, '#ff4b4b', 'Pmax', 'top')
+            draw_tide_blocks(fig_waves, l1_min_blocks, None, '#00d4ff', 'Pmin', 'top')
+            draw_tide_blocks(fig_waves, tide_max_blocks, None, '#ffaa00', 'Tide Max', 'top')
+            draw_tide_blocks(fig_waves, tide_min_blocks, None, '#ffaa00', 'Tide Min', 'top')
             fig_waves.update_xaxes(title=None)
             st.plotly_chart(fig_waves, width="stretch")
             
@@ -412,6 +431,10 @@ def main():
                 fig_micro = px.line(df_waves_plot, x='Datetime', y=micro_cols, 
                                     title="Dải Sóng Ngắn (Micro - Nhiễu động nhiệt)", template="plotly_dark", render_mode="svg", color_discrete_sequence=['#ffaa00'])
                 fig_micro.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
+                draw_tide_blocks(fig_micro, l1_max_blocks, None, '#ff4b4b', 'Pmax', 'top')
+                draw_tide_blocks(fig_micro, l1_min_blocks, None, '#00d4ff', 'Pmin', 'top')
+                draw_tide_blocks(fig_micro, tide_max_blocks, None, '#ffaa00', 'Tide Max', 'top')
+                draw_tide_blocks(fig_micro, tide_min_blocks, None, '#ffaa00', 'Tide Min', 'top')
                 fig_micro.update_xaxes(title=None)
                 st.plotly_chart(fig_micro, width="stretch")
             
@@ -448,6 +471,11 @@ def main():
             
             fig3 = px.line(df_l3, x='Datetime', y='Permutation Entropy', title="Permutation Entropy (Rolling 10m)", template="plotly_dark", render_mode="svg")
             
+            draw_tide_blocks(fig3, l1_max_blocks, None, '#ff4b4b', 'Pmax', 'top')
+            draw_tide_blocks(fig3, l1_min_blocks, None, '#00d4ff', 'Pmin', 'top')
+            draw_tide_blocks(fig3, tide_max_blocks, None, '#ffaa00', 'Tide Max', 'top')
+            draw_tide_blocks(fig3, tide_min_blocks, None, '#ffaa00', 'Tide Min', 'top')
+            
             # Highlight NaN regions (Data Initialization / Corruption)
             nan_mask = df_l3['Permutation Entropy'].isna()
             if nan_mask.any():
@@ -460,6 +488,11 @@ def main():
             st.plotly_chart(fig3, width="stretch")
             
             fig3b = px.line(df_l3, x='Datetime', y='Rolling Variance (10m)', title="Rolling Variance (Proxy for Turbulence)", template="plotly_dark", render_mode="svg")
+            
+            draw_tide_blocks(fig3b, l1_max_blocks, None, '#ff4b4b', 'Pmax', 'top')
+            draw_tide_blocks(fig3b, l1_min_blocks, None, '#00d4ff', 'Pmin', 'top')
+            draw_tide_blocks(fig3b, tide_max_blocks, None, '#ffaa00', 'Tide Max', 'top')
+            draw_tide_blocks(fig3b, tide_min_blocks, None, '#ffaa00', 'Tide Min', 'top')
             
             if nan_mask.any():
                 fig3b.add_vrect(x0=start_nan, x1=end_nan, fillcolor="red", opacity=0.3, layer="below", line_width=0, 
