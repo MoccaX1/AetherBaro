@@ -1,5 +1,7 @@
 # AetherBaro: High-Resolution Atmospheric Layering & Spectral Analyzer
 
+🌍 **Live Demo:** [https://aetherbaro.streamlit.app/](https://aetherbaro.streamlit.app/)
+
 **AetherBaro** là một hệ thống phân tích áp suất khí quyển độ phân giải cao, được thiết kế để bóc tách các hiện tượng vật lý từ dữ liệu thô thông qua cấu trúc phân tích 5 lớp độc lập. Ứng dụng tự động tối ưu hóa dựa trên thông số phần cứng của thiết bị đo (như LG V60, Sony Xperia...) để mang lại độ chính xác cao nhất.
 
 ## 🚀 Tính năng chính (5 Lớp Vật lý)
