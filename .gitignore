@@ -1,2 +1,3 @@
 data/*
 __pycache__
+!data/Pressure_20260223_0029_sample
