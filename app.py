@@ -18,7 +18,12 @@ st.set_page_config(page_title="High-Res Pressure Analyzer", layout="wide")
 
 st.title("Phân Tích Dữ Liệu Áp Suất Thời Gian Thực (5 Lớp Vật Lý)")
 
-DATA_DIR = r"D:\Thanh\Pressure\Project\data"
+# Ensure DATA_DIR works on both Windows Local and Linux Cloud (Streamlit)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+
+if not os.path.exists(DATA_DIR):
+    st.error(f"Kh\u00f4ng t\u00ecm th\u1ea5y th\u01b0 m\u1ee5c d\u1eef li\u1ec7u t\u1ea1i: {DATA_DIR}. Vui l\u00f2ng ki\u1ec3m tra l\u1ea1i th\u01b0 m\u1ee5c data tr\u00ean Github.")
 
 @st.cache_data
 def get_processed_data(folder_path, target_fs=1.0):
