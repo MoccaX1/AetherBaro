@@ -608,28 +608,50 @@ def analyze_device_performance(df_32hz, device_info):
     # Consider gap > 2 * expected as missing data
     metrics['Data Missing Ratio (%)'] = np.sum(time_diffs > (expected_gap * 2)) / len(time_diffs) * 100
     
-    # 2. Hardware Noise (White Noise) vs Tolerance
-    # Isolate high-frequency noise (>16Hz)
-    fs = 32.0
-    nyq = 0.5 * fs
-    b, a = butter(4, 1.0 / nyq, btype='high')
-    data = df_32hz['Pressure (hPa)'].ffill().bfill().values
-    noise = filtfilt(b, a, data)
-    
-    empirical_noise_std = np.std(noise)
-    metrics['Empirical White Noise Std (hPa)'] = empirical_noise_std
-    
+    # 2. Spectral Decomposition of Residuals (Welch PSD)
     hardware_tolerance = device_info.get('Resolution', 0.01)
     
-    # 3. Hardware Drift (Pink Noise / 1/f Wandering)
-    # Detrend the original signal with a 2nd order polynomial to remove macro synoptic trends
-    # The residual represents the low-frequency "wander" of the sensor + any real gravity waves.
     time_s = df_32hz['Time (s)'].values
-    poly = np.polyfit(time_s, data, 2)
-    p_detrend = data - np.polyval(poly, time_s)
+    data = df_32hz['Pressure (hPa)'].ffill().bfill().values
+    fs = 32.0
     
-    pink_noise_rms = np.std(p_detrend)
-    metrics['Empirical Pink Noise RMS (hPa)'] = pink_noise_rms
+    # Detrend to remove macro synoptic trend
+    # Use simple mean subtraction instead of 2nd order polyfit
+    # 2nd order polyfit aggressively destroys the VLF band (>160m) making Drift appear as 0.0!
+    p_detrend = data - np.mean(data)
+    
+    # Use Welch method for Power Spectral Density
+    from scipy.signal import welch
+    # VLF Drift requires resolving frequencies < 1/(60*160) = 0.000104 Hz
+    # This requires a window of at least 160 minutes.
+    # We will use the full length of the data to ensure maximum low-frequency resolution.
+    nperseg = len(p_detrend) 
+        
+    f, psd = welch(p_detrend, fs, nperseg=nperseg)
+    
+    def get_band_rms(f_arr, psd_arr, f_low, f_high):
+        mask = (f_arr >= f_low) & (f_arr < f_high)
+        if not np.any(mask): return 0.0
+        variance = np.trapezoid(psd_arr[mask], f_arr[mask])
+        return np.sqrt(variance) if variance > 0 else 0.0
+        
+    # Band definitions based on physics
+    rms_white = get_band_rms(f, psd, 1.0, fs/2)            # White Noise (Sensor Electrics): > 1Hz
+    rms_turb = get_band_rms(f, psd, 1/60, 1.0)             # Turbulence (Local wind): 1s to 1 min (0.016Hz - 1Hz)
+    rms_waves = get_band_rms(f, psd, 1/(60*160), 1/60)     # Mesoscale Waves: 1 min to 160 min (0.0001Hz - 0.016Hz)
+    rms_vlf = get_band_rms(f, psd, 0.0, 1/(60*160))        # VLF Drift (Sensor Wander): > 160 min (< 0.0001Hz)
+    
+    metrics['Empirical White Noise Std (hPa)'] = rms_white
+    metrics['Empirical Turbulence RMS (hPa)'] = rms_turb
+    metrics['Empirical Waves RMS (hPa)'] = rms_waves
+    metrics['Empirical Pink Noise RMS (hPa)'] = rms_vlf # Kept name for UI backward compatibility, but it's now pure VLF drift
+    metrics['Total Residual RMS (hPa)'] = np.std(p_detrend)
+    
+    # Provide the raw white noise signal for plotting
+    nyq = 0.5 * fs
+    b, a = butter(4, 1.0 / nyq, btype='high')
+    noise_signal = filtfilt(b, a, data)
+    metrics['White Noise Signal'] = noise_signal
     
     # 4. Empirical Resolution (Minimum non-zero difference)
     unique_vals = np.sort(df_32hz['Pressure (hPa)'].unique())
@@ -646,12 +668,12 @@ def analyze_device_performance(df_32hz, device_info):
     score = 100
     if metrics['Data Missing Ratio (%)'] > 0.5:
         score -= min(40, metrics['Data Missing Ratio (%)'] * 10)
-    if empirical_noise_std > hardware_tolerance:
-        penalty = ((empirical_noise_std - hardware_tolerance) / hardware_tolerance) * 20
+    if rms_white > hardware_tolerance:
+        penalty = ((rms_white - hardware_tolerance) / hardware_tolerance) * 20
         score -= min(40, penalty)
     
     metrics['Reliability Score'] = max(0, score)
-    metrics['White Noise Signal'] = noise
+    # White Noise Signal already added above
     
     return metrics
 

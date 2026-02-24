@@ -147,13 +147,17 @@ def main():
         
         st.sidebar.success(f"✅ Dữ liệu đã được tiền xử lý ({int(fs)}Hz)")
         
-        with st.spinner("Đang chẩn đoán chất lượng điện tử cảm biến..."):
+        with st.spinner("Đang chẩn đoán độ phân giải phổ năng lượng (Welch PSD)..."):
             metrics_device = analyze_device_performance(df_32hz, device_info)
             tol = device_info.get('Resolution', 0.01)
             emp_white_noise = metrics_device['Empirical White Noise Std (hPa)']
-            emp_pink_noise = metrics_device['Empirical Pink Noise RMS (hPa)']
+            emp_turb = metrics_device.get('Empirical Turbulence RMS (hPa)', 0)
+            emp_waves = metrics_device.get('Empirical Waves RMS (hPa)', 0)
+            emp_pink_noise = metrics_device['Empirical Pink Noise RMS (hPa)'] # This is now pure VLF drift
             emp_res = metrics_device['Empirical Resolution (hPa)']
-            noise_limit = max(tol, emp_white_noise, emp_res)
+            
+            # The hard noise floor for detecting waves is now the structural VLF drift + white noise
+            noise_limit = max(tol, emp_white_noise + emp_pink_noise, emp_res)
             
         st.write(f"### Tổng quan dữ liệu Gốc (Đã Resample {int(fs)}Hz cho hiệu năng)")
         
@@ -173,8 +177,8 @@ def main():
         duration_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         
         st.caption(f"**Thời gian đo:** {overview_date_str} (Từ {t_start.strftime('%H:%M:%S')} đến {t_end.strftime('%H:%M:%S')}). **Tổng thời gian:** {duration_str}")
-        st.caption(rf"**Thiết bị đo:** {device_info['Model']} | **Cảm biến Áp suất:** {device_info['Sensor']} | **Sai số NSX (Tolerance):** $\pm{tol}$ hPa")
-        st.caption(rf"**Nhiễu Trắng (>16Hz):** $\pm{emp_white_noise:.4f}$ hPa | **Nhiễu Trôi (Pink Noise Drift):** $\pm{emp_pink_noise:.4f}$ hPa")
+        st.caption(rf"**Thiết bị đo:** {device_info['Model']} | **Cảm biến Áp suất:** {device_info['Sensor']} | **Sai số phần cứng:** $\pm{tol}$ hPa")
+        st.caption(rf"**Nhiễu điện tử (>1Hz):** $\pm{emp_white_noise:.4f}$ hPa | **Turbulence gió (1s-1m):** $\pm{emp_turb:.4f}$ hPa | **Nhiễu Trôi VLF (>160m):** $\pm{emp_pink_noise:.4f}$ hPa")
         st.caption(f"**Vị trí đo:** {location_info['City']}, {location_info['Region']}, {location_info['Country']} ({location_info['Latitude']}, {location_info['Longitude']}) | **Múi giờ:** {location_info['Timezone']}")
         
         # Plot downsampled if it's 32Hz to avoid massive browser lag
@@ -426,7 +430,9 @@ def main():
                 amplitude = (sig.max() - sig.min()) / 2
                 
                 snr_tol = amplitude / tol if tol > 0 else 999
-                snr_emp = amplitude / emp_pink_noise if emp_pink_noise > 0 else 999
+                # True dynamic noise floor is Turbulence + White Noise. VLF Drift is a slow baseline, it does NOT mask mesoscale waves.
+                dynamic_noise_floor = emp_turb + emp_white_noise
+                snr_emp = amplitude / dynamic_noise_floor if dynamic_noise_floor > 0 else 999
                 
                 def get_status(snr):
                     if snr >= 3.0: return "✅ Tốt"
@@ -450,7 +456,7 @@ def main():
                     "Độ tin cậy (Nội suy)": get_status(snr_emp)
                 })
                 
-            st.markdown(f"**📊 Phân tích Độ tin cậy (Sai số NSX: {tol:.4f} hPa | Nhiễu thực tế: {emp_pink_noise:.5f} hPa)**")
+            st.markdown(f"**📊 Phân tích Độ tin cậy (Sai số NSX: {tol:.4f} hPa | Sàn nhiễu Động (Turb+Trắng): {dynamic_noise_floor:.5f} hPa)**")
             st.dataframe(pd.DataFrame(wave_reliabilities), width="stretch")
             
             macro_cols = [c for c in filtered_signals.keys() if 'Micro' not in c]
@@ -482,7 +488,9 @@ def main():
                 except ValueError: period_val = 0
                 
                 is_hypothetical = period_val > total_duration_mins
-                is_below_noise = amplitude < emp_pink_noise # emp_pink_noise is now mapped to Pink Noise Drift
+                # Use dynamic_noise_floor (Turbulence + White Noise) as the hard noise floor
+                dynamic_noise_floor = emp_turb + emp_white_noise
+                is_below_noise = amplitude < dynamic_noise_floor
                 
                 if is_hypothetical or is_below_noise:
                     trace.line.dash = 'dot'
@@ -497,9 +505,10 @@ def main():
             draw_tide_blocks(fig_waves_usable, tide_max_blocks, None, '#ffaa00', 'Tide Max', 'top')
             draw_tide_blocks(fig_waves_usable, tide_min_blocks, None, '#ffaa00', 'Tide Min', 'top')
             
-            # Add the Pink Noise floor as a visual threshold boundary
-            fig_waves_usable.add_hline(y=emp_pink_noise, line_dash="dash", line_color="rgba(255, 255, 255, 0.5)", annotation_text="+ Pink Noise Drift")
-            fig_waves_usable.add_hline(y=-emp_pink_noise, line_dash="dash", line_color="rgba(255, 255, 255, 0.5)", annotation_text="- Pink Noise Drift")
+            # Add the Dynamic Noise floor as a visual threshold boundary
+            dynamic_noise_floor = emp_turb + emp_white_noise
+            fig_waves_usable.add_hline(y=dynamic_noise_floor, line_dash="dash", line_color="rgba(255, 255, 255, 0.5)", annotation_text="+ Sàn Nhiễu (Turbulence + Trắng)")
+            fig_waves_usable.add_hline(y=-dynamic_noise_floor, line_dash="dash", line_color="rgba(255, 255, 255, 0.5)", annotation_text="- Sàn Nhiễu (Turbulence + Trắng)")
             
             fig_waves_usable.update_xaxes(title=None)
             st.plotly_chart(fig_waves_usable, width="stretch")
@@ -612,7 +621,8 @@ def main():
             with st.spinner("Đang định dạng báo cáo thiết bị..."):
                 pass # Already computed at the top level
                 
-            c1, c2, c3, c4, c5 = st.columns(5)
+            c1, c2, c3, c4 = st.columns(4)
+            c5, c6, c7, c8 = st.columns(4)
             
             # Formulate reliability color
             score = metrics_device['Reliability Score']
@@ -625,11 +635,16 @@ def main():
             else:
                 score_str = f"🔴 {score:.1f}% (Kém)"
                 
-            c1.metric("Độ Tin Cậy", score_str, help="Điểm tổng thể quy đổi tử Tỷ lệ gián đoạn thông tin, mức độ dơ bẩn của dòng tín hiệu nhiễu cực đại và mật độ bước nhảy số.")
-            c2.metric("Mất Dữ Liệu", f"{metrics_device['Data Missing Ratio (%)']:.4f}%", help="Tỷ lệ những gói tin (Packets) bị bay màu trên đường truyền hoặc vi xử lý bị kẹt không lấy mẫu kịp khung giờ quy định.")
-            c3.metric("Nhiễu Trắng (>16Hz)", f"{metrics_device['Empirical White Noise Std (hPa)']:.6f} hPa", help="Độ lệch chuẩn của Sàn nhiễu trắng (White Noise Floor). Tín hiệu giả sinh ra do giao thoa điện từ trường và rung động nhiệt kế của điện dung nội tại cảm biến.")
-            c4.metric("Nhiễu Trôi (Drift)", f"{metrics_device['Empirical Pink Noise RMS (hPa)']:.6f} hPa", help="Độ lệch chuẩn của Sàn nhiễu trôi (Pink Noise Drift). Tiêu biểu cho sai số rảo (wandering) do tụt áp nhiệt độ.")
-            c5.metric("Độ Phân Giải (Thực)", f"{metrics_device['Empirical Resolution (hPa)']:.6f} hPa", help="Bước nhảy nhạy bén nhỏ nhất thực sự đo đếm được (Grid Resolution) ở ngoài môi trường thay vì con số lý tưởng trong phòng thí nghiệm của Apple/Bosch.")
+            c1.metric("Độ Tin Cậy NSX", score_str, help="Điểm quy đổi từ Tỷ lệ mất gói tin, mức độ nhiễu điện tử và độ phân giải.")
+            c2.metric("Mất Dữ Liệu", f"{metrics_device['Data Missing Ratio (%)']:.4f}%", help="Tỷ lệ gói tin bị rớt mạng.")
+            c3.metric("Độ Phân Giải Thực", f"{metrics_device['Empirical Resolution (hPa)']:.6f} hPa", help="Bước nhảy nhạy bén thực sự ghi nhận được ngoài môi trường.")
+            c4.metric("Dư Số Tổng (Total)", f"{metrics_device.get('Total Residual RMS (hPa)', 0):.5f} hPa", help="Tổng độ lệnh chuẩn sau khi loại bỏ áp suất thuỷ triều. Bao gồm sóng + gió + nhiễu.")
+            
+            # Spectral Decomposition Row
+            c5.metric("Nhiễu Điện Tử (>1Hz)", f"{metrics_device['Empirical White Noise Std (hPa)']:.6f} hPa", help="Nhiễu trắng nội tại chip silicon (White Noise Floor). Sạch nhất.")
+            c6.metric("Turbulence & Gió (1s-1m)", f"{metrics_device.get('Empirical Turbulence RMS (hPa)', 0):.6f} hPa", help="Nhiễu động cơ học cục bộ (Gió quạt, người đi lại, tiếng ồn).")
+            c7.metric("Khí Quyển (1m-160m)", f"{metrics_device.get('Empirical Waves RMS (hPa)', 0):.6f} hPa", help="Năng lượng của Sóng Trọng trường Mesoscale. ĐÂY LÀ ĐỐI TƯỢNG NGHIÊN CỨU!")
+            c8.metric("Nhiễu Trôi VLF (>160m)", f"{metrics_device['Empirical Pink Noise RMS (hPa)']:.6f} hPa", help="Khấu hao tụt áp tụ điện (VLF Drift) do thay đổi nhiệt độ máy. Sàn nhiễu cuối cùng.")
             
             st.markdown("### Khuyến nghị Phân tích (Dựa trên thông số phần cứng)")
             rec_html = "<ul>"
@@ -656,7 +671,8 @@ def main():
             for name, sig in filtered_signals.items():
                 amplitude = (sig.max() - sig.min()) / 2
                 snr_tol = amplitude / tol if tol > 0 else 999
-                snr_emp = amplitude / emp_pink_noise if emp_pink_noise > 0 else 999
+                dynamic_noise_floor = emp_turb + emp_white_noise
+                snr_emp = amplitude / dynamic_noise_floor if dynamic_noise_floor > 0 else 999
                 
                 # Extract period to check if it's hypothetical
                 period_str = name.split('(')[1].replace('m)', '') if '(' in name else '0'
@@ -667,11 +683,11 @@ def main():
                 prefix = "🌫️ <b>[Giả định]</b>" if is_hypothetical else ""
                 
                 if snr_emp >= 3.0:
-                    wave_rec_html += f"<li>✅ {prefix} <b>{name}:</b> Rất Tốt (SNR Thực tế: {snr_emp:.1f}x | SNR NSX: {snr_tol:.1f}x). Biên độ dao động vật lý vượt xa ngưỡng nhiễu phần cứng. {('Tuy nhiên, sóng này dài hơn thời gian đo nên chỉ mang tính tham khảo.' if is_hypothetical else 'Hoàn toàn tin cậy.')}</li>"
+                    wave_rec_html += f"<li>✅ {prefix} <b>{name}:</b> Rất Tốt (SNR Thực tế: {snr_emp:.1f}x | SNR NSX: {snr_tol:.1f}x). Biên độ dao động vật lý vượt xa ngưỡng nhiễu động của máy. {('Tuy nhiên, sóng này dài hơn thời gian đo nên chỉ mang tính tham khảo.' if is_hypothetical else 'Hoàn toàn tin cậy.')}</li>"
                 elif snr_emp >= 1.5:
-                    wave_rec_html += f"<li>🟡 {prefix} <b>{name}:</b> Cảnh Báo (SNR Thực tế: {snr_emp:.1f}x | SNR NSX: {snr_tol:.1f}x). Sóng bị mờ nhạt hoặc tiệm cận với biên độ của sàn nhiễu điện từ thiết bị.</li>"
+                    wave_rec_html += f"<li>🟡 {prefix} <b>{name}:</b> Cảnh Báo (SNR Thực tế: {snr_emp:.1f}x | SNR NSX: {snr_tol:.1f}x). Sóng bị mờ nhạt hoặc tiệm cận với biên độ của sàn nhiễu Gió/Điện từ.</li>"
                 else:
-                    wave_rec_html += f"<li>🔴 {prefix} <b>{name}:</b> Suy thoái (SNR Thực tế: {snr_emp:.1f}x | SNR NSX: {snr_tol:.1f}x). Nhiễu trôi máy đo ({emp_pink_noise:.3f} hPa) dập tắt hoàn toàn bước sóng. Rất dễ bị diễn giải sai!</li>"
+                    wave_rec_html += f"<li>🔴 {prefix} <b>{name}:</b> Suy thoái (SNR Thực tế: {snr_emp:.1f}x | SNR NSX: {snr_tol:.1f}x). Sàn nhiễu động ({dynamic_noise_floor:.3f} hPa) dập tắt hoàn toàn bước sóng. Rất dễ bị diễn giải sai!</li>"
                     
             wave_rec_html += "</ul>"
             st.markdown(wave_rec_html, unsafe_allow_html=True)
