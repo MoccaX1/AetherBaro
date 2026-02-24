@@ -451,11 +451,7 @@ def main():
                 })
                 
             st.markdown(f"**📊 Phân tích Độ tin cậy (Sai số NSX: {tol:.4f} hPa | Nhiễu thực tế: {emp_pink_noise:.5f} hPa)**")
-            try:
-                st.dataframe(pd.DataFrame(wave_reliabilities), use_container_width=True)
-            except TypeError:
-                # Fallback if use_container_width is removed
-                st.dataframe(pd.DataFrame(wave_reliabilities), width="stretch")
+            st.dataframe(pd.DataFrame(wave_reliabilities), width="stretch")
             
             macro_cols = [c for c in filtered_signals.keys() if 'Micro' not in c]
             micro_cols = [c for c in filtered_signals.keys() if 'Micro' in c]
