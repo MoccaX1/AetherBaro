@@ -301,6 +301,52 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=4):
     y = sosfiltfilt(sos, data)
     return y
 
+def fft_bandpass_filter(data, lowcut, highcut, fs, pad_factor=4):
+    """
+    Numerically stable zero-phase bandpass filter using FFT.
+    Uses zero-padding to resolve frequencies lower than the fundamental 
+    frequency of the raw data length (e.g. 3-hour wave in a 2-hour file).
+    """
+    n_orig = len(data)
+    n_padded = n_orig * pad_factor
+    
+    # Detrend/Demean before padding to prevent massive step-change artifacts at the edges
+    mean_val = np.mean(data)
+    data_centered = data - mean_val
+    
+    # Pad with zeros
+    data_padded = np.zeros(n_padded)
+    # Put data in the middle to minimize edge effects, or just at the start. 
+    # Simply padding at the end is standard for FFT resolution interpolation.
+    data_padded[:n_orig] = data_centered
+    
+    yf = np.fft.rfft(data_padded)
+    xf = np.fft.rfftfreq(n_padded, d=1/fs)
+    
+    # Create ideal bandpass mask
+    mask = (xf >= lowcut) & (xf <= highcut)
+    
+    # Smooth the edges to avoid time-domain ringing (Gibbs phenomenon)
+    window = np.zeros_like(xf)
+    bw = highcut - lowcut
+    # Taper dynamically based on bandwidth, minimum of 1 bin
+    taper = max(bw * 0.1, xf[1]) 
+    
+    for i, f in enumerate(xf):
+        if lowcut <= f <= highcut:
+            window[i] = 1.0
+        elif lowcut - taper < f < lowcut and taper > 0:
+            window[i] = (f - (lowcut - taper)) / taper
+        elif highcut < f < highcut + taper and taper > 0:
+            window[i] = 1.0 - (f - highcut) / taper
+            
+    yf_filtered = yf * window
+    y_filtered_padded = np.fft.irfft(yf_filtered, n=n_padded)
+    
+    # Extract the original time frame
+    y_filtered = y_filtered_padded[:n_orig]
+    return y_filtered
+
 def compute_zero_padded_fft(data, fs, pad_factor=4):
     """
     Computes zero-padded FFT to increase spectral resolution and avoid leakage.
@@ -333,42 +379,30 @@ def analyze_layer_2(df_base, fs=1.0):
     periods_min = (1 / freqs[valid_idx]) / 60
     power_valid = power[valid_idx]
     
-    # Pre-smooth the power spectrum slightly to avoid finding noise spikes as peaks
-    power_smoothed = gaussian_filter1d(power_valid, sigma=2)
-    
-    # Find all peaks in the smoothed spectrum
-    peaks, _ = find_peaks(power_smoothed, distance=10) # distance to ensure peaks are separated
-    peak_periods = periods_min[peaks]
-    peak_powers = power_smoothed[peaks]
-    
     # 2. Define physical search windows for wave types
-    # Adjusted based on empirical AI findings:
-    # 160m (File Length/Boss), 80m (Dominant Mother), 40m (Harmonic Child), 12m (Thermal Micro)
     search_windows = {
-        'Boss': (140, 200, 0.1),    # Narrower bw_ratio to lock onto the actual long trend
-        'Mother': (70, 95, 0.15),
-        'Child': (35, 48, 0.15),
-        'Micro': (10, 25, 0.2)      # Wider bw_ratio for thermal fluctuations
+        'Boss': (140, 200, 0.1),    # Boss: Long macro trend
+        'Mother': (70, 95, 0.15),   # Mother wave
+        'Child': (35, 48, 0.15),    # Child harmonic
+        'Micro': (10, 25, 0.2)      # Micro thermal turbulence
     }
     
     dynamic_bands = {}
     
     for name, (min_p, max_p, bw_ratio) in search_windows.items():
-        # Find peaks within this specific physical window
-        mask = (peak_periods >= min_p) & (peak_periods <= max_p)
-        valid_peaks = peak_periods[mask]
-        valid_powers = peak_powers[mask]
+        # Mask out periods within the specific window
+        mask = (periods_min >= min_p) & (periods_min <= max_p)
         
-        if len(valid_peaks) > 0:
-            # Pick the strongest peak in this window
-            best_idx = np.argmax(valid_powers)
-            true_peak = valid_peaks[best_idx]
+        if np.any(mask):
+            # Find the period carrying maximum power in each designated physical window
+            best_idx = np.argmax(power_valid[mask])
+            true_peak = periods_min[mask][best_idx]
             
             # Create a dynamic band around this true peak
             low_p = true_peak * (1 - bw_ratio)
             high_p = true_peak * (1 + bw_ratio)
         else:
-            # Fallback to default center if no clear peak is found
+            # Fallback to default center if the window is completely empty
             center = (min_p + max_p) / 2
             low_p = center * (1 - bw_ratio)
             high_p = center * (1 + bw_ratio)
@@ -385,7 +419,13 @@ def analyze_layer_2(df_base, fs=1.0):
             'base_name': name
         }
         
-    # 2.5 Find if there's a massive peak outside our predefined windows
+    # 2.5 Find if there's a massive peak outside our predefined windows using find_peaks to ensure it's a real anomaly
+    from scipy.signal import find_peaks
+    power_smoothed = gaussian_filter1d(power_valid, sigma=2)
+    peaks, _ = find_peaks(power_smoothed, distance=10)
+    peak_periods = periods_min[peaks]
+    peak_powers = power_smoothed[peaks]
+    
     if len(peak_periods) > 0:
         global_max_idx = np.argmax(peak_powers)
         global_peak_p = peak_periods[global_max_idx]
@@ -417,7 +457,8 @@ def analyze_layer_2(df_base, fs=1.0):
     filtered_signals = {}
     for label, info in dynamic_bands.items():
         low_f, high_f = info['freqs']
-        filtered_signals[label] = butter_bandpass_filter(data, low_f, high_f, fs)
+        # Use FFT bandpass to guarantee numeric stability for ultra-low frequencies
+        filtered_signals[label] = fft_bandpass_filter(data, low_f, high_f, fs)
         
     # Extract exact global peak period (between 10m and 300m)
     global_mask = (periods_min >= 10) & (periods_min <= 300)

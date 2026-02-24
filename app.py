@@ -147,6 +147,13 @@ def main():
         
         st.sidebar.success(f"✅ Dữ liệu đã được tiền xử lý ({int(fs)}Hz)")
         
+        with st.spinner("Đang chẩn đoán chất lượng điện tử cảm biến..."):
+            metrics_device = analyze_device_performance(df_32hz, device_info)
+            tol = device_info.get('Resolution', 0.01)
+            emp_noise = metrics_device['Empirical Noise Std (hPa)']
+            emp_res = metrics_device['Empirical Resolution (hPa)']
+            noise_limit = max(tol, emp_noise, emp_res)
+            
         st.write(f"### Tổng quan dữ liệu Gốc (Đã Resample {int(fs)}Hz cho hiệu năng)")
         
         # Calculate start/end and dual date for overview header
@@ -407,6 +414,32 @@ def main():
                 
             df_waves_plot = df_waves.iloc[::plot_step] if fs > 1.0 else df_waves
             
+            # --- WAVE RELIABILITY ASSESSMENT ---
+            wave_reliabilities = []
+            for name, sig in filtered_signals.items():
+                amplitude = (sig.max() - sig.min()) / 2
+                snr = amplitude / noise_limit if noise_limit > 0 else 999
+                
+                if snr >= 3.0:
+                    status = "✅ Tốt"
+                elif snr >= 1.5:
+                    status = "🟡 TB"
+                else:
+                    status = "🔴 Kém"
+                    
+                period_str = name.split('(')[1].replace('m)', '') if '(' in name else 'N/A'
+                
+                wave_reliabilities.append({
+                    "Phân lớp": name.split(' ')[0],
+                    "Chu kỳ Peak (m)": period_str,
+                    "Biên độ (hPa)": f"{amplitude:.4f}",
+                    "Tỷ lệ Tín hiệu/Nhiễu": f"{snr:.1f}x",
+                    "Độ tin cậy đo lường": status
+                })
+                
+            st.markdown(f"**📊 Trạng thái thu sóng & Độ tin cậy (So với Cột nhiễu thiết bị: {noise_limit:.4f} hPa)**")
+            st.dataframe(pd.DataFrame(wave_reliabilities), use_container_width=True)
+            
             macro_cols = [c for c in filtered_signals.keys() if 'Micro' not in c]
             micro_cols = [c for c in filtered_signals.keys() if 'Micro' in c]
             
@@ -548,8 +581,8 @@ def main():
             st.header("6. Đánh giá Thiết bị & Độ tin cậy (Device Evaluation)", help="Phân tích cơ học lượng tử của dòng dữ liệu nhằm mổ xẻ chất lượng điện tử nội tại của bản thân con chip Cảm biến trước khi tin tưởng các chỉ số vật lý nó cung cấp.")
             st.write("Đánh giá chất lượng dữ liệu thu thập được từ thiết bị đo để xác định độ tin cậy của các phân tích vật lý.")
             
-            with st.spinner("Đang phân tích độ tin cậy thiết bị..."):
-                metrics_device = analyze_device_performance(df_32hz, device_info)
+            with st.spinner("Đang định dạng báo cáo thiết bị..."):
+                pass # Already computed at the top level
                 
             c1, c2, c3, c4 = st.columns(4)
             
@@ -571,8 +604,6 @@ def main():
             
             st.markdown("### Khuyến nghị Phân tích (Dựa trên thông số phần cứng)")
             rec_html = "<ul>"
-            tol = device_info.get('Resolution', 0.01)
-            emp_noise = metrics_device['Empirical Noise Std (hPa)']
             
             if emp_noise < tol:
                 rec_html += f"<li>✅ Nhiễu môi trường ({emp_noise:.5f}) thấp hơn sai số lý thuyết của cảm biến ({tol}). Dữ liệu rất sạch.</li>"
@@ -587,27 +618,20 @@ def main():
             rec_html += "</ul>"
             st.markdown(rec_html, unsafe_allow_html=True)
             
-            st.markdown("### Đánh giá Độ chính xác theo Dải Sóng (Layer 2 & 4)")
+            st.markdown("### Đánh giá Độ chính xác theo Dải Sóng (Quét động theo Layer 2)")
             wave_rec_html = "<ul>"
-            emp_res = metrics_device['Empirical Resolution (hPa)']
-            limit = max(tol, emp_noise, emp_res)
             
-            if limit <= 0.02:
-                wave_rec_html += "<li>✅ <b>Dải Vi mô (Micro - <10m):</b> Rất Tốt. Dữ liệu đủ sạch để quan sát nhiễu động nhiệt và gió giật (<0.02 hPa).</li>"
-            else:
-                wave_rec_html += f"<li>⚠️ <b>Dải Vi mô (Micro - <10m):</b> Kém chính xác. Nhiễu phần cứng ({limit:.3f} hPa) lớn hơn biên độ sóng vi mô thông thường.</li>"
+            for name, sig in filtered_signals.items():
+                amplitude = (sig.max() - sig.min()) / 2
+                snr = amplitude / noise_limit if noise_limit > 0 else 999
                 
-            if limit <= 0.05:
-                wave_rec_html += "<li>✅ <b>Dải Child (35-45m):</b> Độ chính xác cao. Dễ dàng nhận diện các dao động áp suất cục bộ trung bình.</li>"
-            else:
-                wave_rec_html += f"<li>⚠️ <b>Dải Child (35-45m):</b> Có thể lẫn nhiễu. Giới hạn cảm biến ({limit:.3f} hPa) tiệm cận với biên độ sóng Child.</li>"
-                
-            if limit <= 0.2:
-                wave_rec_html += "<li>✅ <b>Dải Mother (75-85m):</b> Rất Tốt. Sóng ổn định định kỳ của bầu khí quyển hoàn toàn tin cậy.</li>"
-            else:
-                wave_rec_html += f"<li>⚠️ <b>Dải Mother (75-85m):</b> Cảnh báo độ chính xác bị suy giảm.</li>"
-                
-            wave_rec_html += "<li>✅ <b>Dải Boss (150-180m):</b> Hoàn toàn chính xác. Biên độ sóng Synoptic lớn (>0.5 hPa) dễ dàng vượt qua mọi giới hạn nhiễu phần cứng.</li>"
+                if snr >= 3.0:
+                    wave_rec_html += f"<li>✅ <b>{name}:</b> Rất Tốt (SNR: {snr:.1f}x). Biên độ dao động vật lý vượt xa ngưỡng nhiễu phần cứng. Hoàn toàn tin cậy.</li>"
+                elif snr >= 1.5:
+                    wave_rec_html += f"<li>🟡 <b>{name}:</b> Cảnh Báo (SNR: {snr:.1f}x). Sóng bị mờ nhạt hoặc tiệm cận với biên độ của sàn nhiễu điện từ thiết bị.</li>"
+                else:
+                    wave_rec_html += f"<li>🔴 <b>{name}:</b> Suy thoái (SNR: {snr:.1f}x). Nhiễu máy đo ({noise_limit:.3f} hPa) dập tắt hoàn toàn bước sóng. Rất dễ bị diễn giải sai!</li>"
+                    
             wave_rec_html += "</ul>"
             st.markdown(wave_rec_html, unsafe_allow_html=True)
             
