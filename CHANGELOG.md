@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.10] - 2026-02-24
+### Features
+- feat: Enhance wave analysis reliability reporting by incorporating actual noise from data and add supporting analysis scripts for amplitude and FFT calculations. ([#c1a0b66](https://github.com/user/repo/commit/c1a0b66e294857f0c2ee3db6f0674f8e0046dafb))
+
 ## [1.1.9] - 2026-02-24
 ### Bug Fixes
 - fix: Amplitude Calculation for Long Waves in Layer 2 ([#710e960](https://github.com/user/repo/commit/710e9609a942056d6d3a1acbf1a05376f56f0add))
