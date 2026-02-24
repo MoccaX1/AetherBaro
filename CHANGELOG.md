@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.11] - 2026-02-24
+### Features
+- feat: Add new pressure sample datasets and related analysis scripts, updating gitignore. ([#55684ce](https://github.com/user/repo/commit/55684ce776506fa5d5ee573bc3e159f0f3aaa210))
+- feat: Enhance noise analysis to distinguish white and pink noise, and introduce wave evaluation scripts. ([#30f9c95](https://github.com/user/repo/commit/30f9c95427211aef84817cbc22c9879e25419bf2))
+
 ## [1.1.10] - 2026-02-24
 ### Features
 - feat: Enhance wave analysis reliability reporting by incorporating actual noise from data and add supporting analysis scripts for amplitude and FFT calculations. ([#c1a0b66](https://github.com/user/repo/commit/c1a0b66e294857f0c2ee3db6f0674f8e0046dafb))
