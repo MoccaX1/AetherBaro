@@ -6,3 +6,4 @@ plotly>=5.18.0
 requests>=2.31.0
 astral>=3.2
 lunardate>=0.2.2
+skyfield>=1.40
