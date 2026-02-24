@@ -150,9 +150,10 @@ def main():
         with st.spinner("Đang chẩn đoán chất lượng điện tử cảm biến..."):
             metrics_device = analyze_device_performance(df_32hz, device_info)
             tol = device_info.get('Resolution', 0.01)
-            emp_noise = metrics_device['Empirical Noise Std (hPa)']
+            emp_white_noise = metrics_device['Empirical White Noise Std (hPa)']
+            emp_pink_noise = metrics_device['Empirical Pink Noise RMS (hPa)']
             emp_res = metrics_device['Empirical Resolution (hPa)']
-            noise_limit = max(tol, emp_noise, emp_res)
+            noise_limit = max(tol, emp_white_noise, emp_res)
             
         st.write(f"### Tổng quan dữ liệu Gốc (Đã Resample {int(fs)}Hz cho hiệu năng)")
         
@@ -172,7 +173,8 @@ def main():
         duration_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         
         st.caption(f"**Thời gian đo:** {overview_date_str} (Từ {t_start.strftime('%H:%M:%S')} đến {t_end.strftime('%H:%M:%S')}). **Tổng thời gian:** {duration_str}")
-        st.caption(rf"**Thiết bị đo:** {device_info['Model']} | **Cảm biến Áp suất:** {device_info['Sensor']} | **Sai số NSX (Tolerance):** $\pm{tolerance}$ hPa | **Nhiễu nội suy từ dữ liệu (Actual Noise):** $\pm{emp_noise:.4f}$ hPa")
+        st.caption(rf"**Thiết bị đo:** {device_info['Model']} | **Cảm biến Áp suất:** {device_info['Sensor']} | **Sai số NSX (Tolerance):** $\pm{tol}$ hPa")
+        st.caption(rf"**Nhiễu Trắng (>16Hz):** $\pm{emp_white_noise:.4f}$ hPa | **Nhiễu Trôi (Pink Noise Drift):** $\pm{emp_pink_noise:.4f}$ hPa")
         st.caption(f"**Vị trí đo:** {location_info['City']}, {location_info['Region']}, {location_info['Country']} ({location_info['Latitude']}, {location_info['Longitude']}) | **Múi giờ:** {location_info['Timezone']}")
         
         # Plot downsampled if it's 32Hz to avoid massive browser lag
@@ -416,11 +418,15 @@ def main():
             
             # --- WAVE RELIABILITY ASSESSMENT ---
             wave_reliabilities = []
+            
+            # File duration in minutes
+            total_duration_mins = duration.total_seconds() / 60
+            
             for name, sig in filtered_signals.items():
                 amplitude = (sig.max() - sig.min()) / 2
                 
                 snr_tol = amplitude / tol if tol > 0 else 999
-                snr_emp = amplitude / emp_noise if emp_noise > 0 else 999
+                snr_emp = amplitude / emp_pink_noise if emp_pink_noise > 0 else 999
                 
                 def get_status(snr):
                     if snr >= 3.0: return "✅ Tốt"
@@ -428,9 +434,14 @@ def main():
                     return "🔴 Kém"
                     
                 period_str = name.split('(')[1].replace('m)', '') if '(' in name else 'N/A'
+                try: period_val = float(period_str)
+                except ValueError: period_val = 0
+                
+                is_hypothetical = period_val > total_duration_mins
+                prefix = "🌫️ [Giả định] " if is_hypothetical else ""
                 
                 wave_reliabilities.append({
-                    "Phân lớp": name.split(' ')[0],
+                    "Phân lớp": prefix + name.split(' ')[0],
                     "Chu kỳ Peak (m)": period_str,
                     "Biên độ (hPa)": f"{amplitude:.4f}",
                     "SNR (NSX)": f"{snr_tol:.1f}x",
@@ -439,8 +450,12 @@ def main():
                     "Độ tin cậy (Nội suy)": get_status(snr_emp)
                 })
                 
-            st.markdown(f"**📊 Phân tích Độ tin cậy (Sai số NSX: {tol:.4f} hPa | Nhiễu thực tế: {emp_noise:.5f} hPa)**")
-            st.dataframe(pd.DataFrame(wave_reliabilities), use_container_width=True)
+            st.markdown(f"**📊 Phân tích Độ tin cậy (Sai số NSX: {tol:.4f} hPa | Nhiễu thực tế: {emp_pink_noise:.5f} hPa)**")
+            try:
+                st.dataframe(pd.DataFrame(wave_reliabilities), use_container_width=True)
+            except TypeError:
+                # Fallback if use_container_width is removed
+                st.dataframe(pd.DataFrame(wave_reliabilities), width="stretch")
             
             macro_cols = [c for c in filtered_signals.keys() if 'Micro' not in c]
             micro_cols = [c for c in filtered_signals.keys() if 'Micro' in c]
@@ -456,27 +471,42 @@ def main():
             fig_waves_combined.update_xaxes(title=None)
             st.plotly_chart(fig_waves_combined, width="stretch")
                 
-            # 2. Separated Macro Waves
-            fig_waves = px.line(df_waves_plot, x='Datetime', y=macro_cols, 
-                                title="Các Dải Sóng Dài (Boss/Mother/Child - Vĩ mô)", template="plotly_dark", render_mode="svg")
-            fig_waves.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
-            draw_tide_blocks(fig_waves, l1_max_blocks, None, '#ff4b4b', 'Pmax', 'top')
-            draw_tide_blocks(fig_waves, l1_min_blocks, None, '#00d4ff', 'Pmin', 'top')
-            draw_tide_blocks(fig_waves, tide_max_blocks, None, '#ffaa00', 'Tide Max', 'top')
-            draw_tide_blocks(fig_waves, tide_min_blocks, None, '#ffaa00', 'Tide Min', 'top')
-            fig_waves.update_xaxes(title=None)
-            st.plotly_chart(fig_waves, width="stretch")
+            # 2. Biểu đồ Khả dụng Cuối cùng (Usability Chart)
+            # Differentiate waves that survive the Pink Noise (Drift) test
+            fig_waves_usable = px.line(df_waves_plot, x='Datetime', y=list(filtered_signals.keys()), 
+                                       title="Biểu đồ Khả dụng Cuối cùng (Đã lọc qua nền Nhiễu Trôi 1/f)", template="plotly_dark", render_mode="svg")
             
-            if micro_cols:
-                fig_micro = px.line(df_waves_plot, x='Datetime', y=micro_cols, 
-                                    title="Dải Sóng Ngắn (Micro - Nhiễu động nhiệt)", template="plotly_dark", render_mode="svg", color_discrete_sequence=['#ffaa00'])
-                fig_micro.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
-                draw_tide_blocks(fig_micro, l1_max_blocks, None, '#ff4b4b', 'Pmax', 'top')
-                draw_tide_blocks(fig_micro, l1_min_blocks, None, '#00d4ff', 'Pmin', 'top')
-                draw_tide_blocks(fig_micro, tide_max_blocks, None, '#ffaa00', 'Tide Max', 'top')
-                draw_tide_blocks(fig_micro, tide_min_blocks, None, '#ffaa00', 'Tide Min', 'top')
-                fig_micro.update_xaxes(title=None)
-                st.plotly_chart(fig_micro, width="stretch")
+            for trace in fig_waves_usable.data:
+                name = trace.name
+                sig = filtered_signals[name]
+                amplitude = (sig.max() - sig.min()) / 2
+                
+                period_str = name.split('(')[1].replace('m)', '') if '(' in name else '0'
+                try: period_val = float(period_str)
+                except ValueError: period_val = 0
+                
+                is_hypothetical = period_val > total_duration_mins
+                is_below_noise = amplitude < emp_pink_noise # emp_pink_noise is now mapped to Pink Noise Drift
+                
+                if is_hypothetical or is_below_noise:
+                    trace.line.dash = 'dot'
+                    trace.opacity = 0.3 # Fade out unverified signals
+                else:
+                    trace.line.width = 2
+                    trace.opacity = 1.0 # Highlight verified signals
+                    
+            fig_waves_usable.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
+            draw_tide_blocks(fig_waves_usable, l1_max_blocks, None, '#ff4b4b', 'Pmax', 'top')
+            draw_tide_blocks(fig_waves_usable, l1_min_blocks, None, '#00d4ff', 'Pmin', 'top')
+            draw_tide_blocks(fig_waves_usable, tide_max_blocks, None, '#ffaa00', 'Tide Max', 'top')
+            draw_tide_blocks(fig_waves_usable, tide_min_blocks, None, '#ffaa00', 'Tide Min', 'top')
+            
+            # Add the Pink Noise floor as a visual threshold boundary
+            fig_waves_usable.add_hline(y=emp_pink_noise, line_dash="dash", line_color="rgba(255, 255, 255, 0.5)", annotation_text="+ Pink Noise Drift")
+            fig_waves_usable.add_hline(y=-emp_pink_noise, line_dash="dash", line_color="rgba(255, 255, 255, 0.5)", annotation_text="- Pink Noise Drift")
+            
+            fig_waves_usable.update_xaxes(title=None)
+            st.plotly_chart(fig_waves_usable, width="stretch")
             
             df_fft = pd.DataFrame({'Period (minutes)': periods_min, 'Power': power_valid})
             df_fft = df_fft[(df_fft['Period (minutes)'] >= 10) & (df_fft['Period (minutes)'] <= 300)]
@@ -586,7 +616,7 @@ def main():
             with st.spinner("Đang định dạng báo cáo thiết bị..."):
                 pass # Already computed at the top level
                 
-            c1, c2, c3, c4 = st.columns(4)
+            c1, c2, c3, c4, c5 = st.columns(5)
             
             # Formulate reliability color
             score = metrics_device['Reliability Score']
@@ -599,18 +629,19 @@ def main():
             else:
                 score_str = f"🔴 {score:.1f}% (Kém)"
                 
-            c1.metric("Độ Tin Cậy Dữ Liệu", score_str, help="Điểm tổng thể quy đổi tử Tỷ lệ gián đoạn thông tin, mức độ dơ bẩn của dòng tín hiệu nhiễu cực đại và mật độ bước nhảy số.")
-            c2.metric("Tỉ lệ Mất Dữ Liệu", f"{metrics_device['Data Missing Ratio (%)']:.4f}%", help="Tỷ lệ những gói tin (Packets) bị bay màu trên đường truyền hoặc vi xử lý bị kẹt không lấy mẫu kịp khung giờ quy định.")
-            c3.metric("Nhiễu Cao Tần (Std)", f"{metrics_device['Empirical Noise Std (hPa)']:.6f} hPa", help="Độ lệch chuẩn của Sàn nhiễu trắng (White Noise Floor). Tín hiệu giả sinh ra do giao thoa điện từ trường và rung động nhiệt kế của điện dung nội tại cảm biến.")
-            c4.metric("Độ Phân Giải Thực Tế", f"{metrics_device['Empirical Resolution (hPa)']:.6f} hPa", help="Bước nhảy nhạy bén nhỏ nhất thực sự đo đếm được (Grid Resolution) ở ngoài môi trường thay vì con số lý tưởng trong phòng thí nghiệm của Apple/Bosch.")
+            c1.metric("Độ Tin Cậy", score_str, help="Điểm tổng thể quy đổi tử Tỷ lệ gián đoạn thông tin, mức độ dơ bẩn của dòng tín hiệu nhiễu cực đại và mật độ bước nhảy số.")
+            c2.metric("Mất Dữ Liệu", f"{metrics_device['Data Missing Ratio (%)']:.4f}%", help="Tỷ lệ những gói tin (Packets) bị bay màu trên đường truyền hoặc vi xử lý bị kẹt không lấy mẫu kịp khung giờ quy định.")
+            c3.metric("Nhiễu Trắng (>16Hz)", f"{metrics_device['Empirical White Noise Std (hPa)']:.6f} hPa", help="Độ lệch chuẩn của Sàn nhiễu trắng (White Noise Floor). Tín hiệu giả sinh ra do giao thoa điện từ trường và rung động nhiệt kế của điện dung nội tại cảm biến.")
+            c4.metric("Nhiễu Trôi (Drift)", f"{metrics_device['Empirical Pink Noise RMS (hPa)']:.6f} hPa", help="Độ lệch chuẩn của Sàn nhiễu trôi (Pink Noise Drift). Tiêu biểu cho sai số rảo (wandering) do tụt áp nhiệt độ.")
+            c5.metric("Độ Phân Giải (Thực)", f"{metrics_device['Empirical Resolution (hPa)']:.6f} hPa", help="Bước nhảy nhạy bén nhỏ nhất thực sự đo đếm được (Grid Resolution) ở ngoài môi trường thay vì con số lý tưởng trong phòng thí nghiệm của Apple/Bosch.")
             
             st.markdown("### Khuyến nghị Phân tích (Dựa trên thông số phần cứng)")
             rec_html = "<ul>"
             
-            if emp_noise < tol:
-                rec_html += f"<li>✅ Nhiễu môi trường ({emp_noise:.5f}) thấp hơn sai số lý thuyết của cảm biến ({tol}). Dữ liệu rất sạch.</li>"
+            if emp_pink_noise < tol:
+                rec_html += f"<li>✅ Nhiễu môi trường ({emp_pink_noise:.5f}) thấp hơn sai số lý thuyết của cảm biến ({tol}). Dữ liệu khá sạch.</li>"
             else:
-                rec_html += f"<li>⚠️ Nhiễu môi trường ({emp_noise:.5f}) cao hơn sai số lý thuyết ({tol}). Các hiện tượng vi mô ở Layer 4 có thể bị lẫn nhiễu vật lý.</li>"
+                rec_html += f"<li>⚠️ <b>Cảm biến lang thang (Wandering)</b>: Nhiễu môi trường (Drift: {emp_pink_noise:.5f}) cao hơn sai số lý thuyết ({tol}). Các sóng siêu dài dễ bị lẫn vào hiện tượng Drift.</li>"
                 
             if metrics_device['Data Missing Ratio (%)'] > 1.0:
                 rec_html += "<li>⚠️ Cảnh báo: Tỉ lệ mất gói tin khá cao, có thể ảnh hưởng đến kết quả biến đổi Fourier (Layer 2) và Entropy (Layer 3).</li>"
@@ -623,24 +654,35 @@ def main():
             st.markdown("### Đánh giá Độ chính xác theo Dải Sóng (Quét động theo Layer 2)")
             wave_rec_html = "<ul>"
             
+            # File duration in minutes
+            total_duration_mins = duration.total_seconds() / 60
+            
             for name, sig in filtered_signals.items():
                 amplitude = (sig.max() - sig.min()) / 2
                 snr_tol = amplitude / tol if tol > 0 else 999
-                snr_emp = amplitude / emp_noise if emp_noise > 0 else 999
+                snr_emp = amplitude / emp_pink_noise if emp_pink_noise > 0 else 999
+                
+                # Extract period to check if it's hypothetical
+                period_str = name.split('(')[1].replace('m)', '') if '(' in name else '0'
+                try: period_val = float(period_str)
+                except ValueError: period_val = 0
+                
+                is_hypothetical = period_val > total_duration_mins
+                prefix = "🌫️ <b>[Giả định]</b>" if is_hypothetical else ""
                 
                 if snr_emp >= 3.0:
-                    wave_rec_html += f"<li>✅ <b>{name}:</b> Rất Tốt (SNR Thực tế: {snr_emp:.1f}x | SNR NSX: {snr_tol:.1f}x). Biên độ dao động vật lý vượt xa ngưỡng nhiễu phần cứng. Hoàn toàn tin cậy.</li>"
+                    wave_rec_html += f"<li>✅ {prefix} <b>{name}:</b> Rất Tốt (SNR Thực tế: {snr_emp:.1f}x | SNR NSX: {snr_tol:.1f}x). Biên độ dao động vật lý vượt xa ngưỡng nhiễu phần cứng. {('Tuy nhiên, sóng này dài hơn thời gian đo nên chỉ mang tính tham khảo.' if is_hypothetical else 'Hoàn toàn tin cậy.')}</li>"
                 elif snr_emp >= 1.5:
-                    wave_rec_html += f"<li>🟡 <b>{name}:</b> Cảnh Báo (SNR Thực tế: {snr_emp:.1f}x | SNR NSX: {snr_tol:.1f}x). Sóng bị mờ nhạt hoặc tiệm cận với biên độ của sàn nhiễu điện từ thiết bị.</li>"
+                    wave_rec_html += f"<li>🟡 {prefix} <b>{name}:</b> Cảnh Báo (SNR Thực tế: {snr_emp:.1f}x | SNR NSX: {snr_tol:.1f}x). Sóng bị mờ nhạt hoặc tiệm cận với biên độ của sàn nhiễu điện từ thiết bị.</li>"
                 else:
-                    wave_rec_html += f"<li>🔴 <b>{name}:</b> Suy thoái (SNR Thực tế: {snr_emp:.1f}x | SNR NSX: {snr_tol:.1f}x). Nhiễu máy đo ({emp_noise:.3f} hPa) dập tắt hoàn toàn bước sóng. Rất dễ bị diễn giải sai!</li>"
+                    wave_rec_html += f"<li>🔴 {prefix} <b>{name}:</b> Suy thoái (SNR Thực tế: {snr_emp:.1f}x | SNR NSX: {snr_tol:.1f}x). Nhiễu trôi máy đo ({emp_pink_noise:.3f} hPa) dập tắt hoàn toàn bước sóng. Rất dễ bị diễn giải sai!</li>"
                     
             wave_rec_html += "</ul>"
             st.markdown(wave_rec_html, unsafe_allow_html=True)
             
             # Plot High Frequency Noise
             # To avoid huge UI lag, plot downsampled noise
-            df_noise = pd.DataFrame({'Datetime': df_32hz['Datetime'], 'Noise': metrics_device['Noise Signal']})
+            df_noise = pd.DataFrame({'Datetime': df_32hz['Datetime'], 'Noise': metrics_device['White Noise Signal']})
             df_noise_plot = df_noise.iloc[::32] # downsample to 1Hz
             
             fig_noise = px.line(df_noise_plot, x='Datetime', y='Noise', title="Nhiễu phần cứng/môi trường > 16Hz (Đã Downsample 1Hz để hiển thị)", template="plotly_dark", render_mode="svg")

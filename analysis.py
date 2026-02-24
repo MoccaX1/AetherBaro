@@ -608,8 +608,8 @@ def analyze_device_performance(df_32hz, device_info):
     # Consider gap > 2 * expected as missing data
     metrics['Data Missing Ratio (%)'] = np.sum(time_diffs > (expected_gap * 2)) / len(time_diffs) * 100
     
-    # 2. Hardware Noise vs Tolerance
-    # Isolate high-frequency noise
+    # 2. Hardware Noise (White Noise) vs Tolerance
+    # Isolate high-frequency noise (>16Hz)
     fs = 32.0
     nyq = 0.5 * fs
     b, a = butter(4, 1.0 / nyq, btype='high')
@@ -617,11 +617,21 @@ def analyze_device_performance(df_32hz, device_info):
     noise = filtfilt(b, a, data)
     
     empirical_noise_std = np.std(noise)
-    metrics['Empirical Noise Std (hPa)'] = empirical_noise_std
+    metrics['Empirical White Noise Std (hPa)'] = empirical_noise_std
     
     hardware_tolerance = device_info.get('Resolution', 0.01)
     
-    # 3. Empirical Resolution (Minimum non-zero difference)
+    # 3. Hardware Drift (Pink Noise / 1/f Wandering)
+    # Detrend the original signal with a 2nd order polynomial to remove macro synoptic trends
+    # The residual represents the low-frequency "wander" of the sensor + any real gravity waves.
+    time_s = df_32hz['Time (s)'].values
+    poly = np.polyfit(time_s, data, 2)
+    p_detrend = data - np.polyval(poly, time_s)
+    
+    pink_noise_rms = np.std(p_detrend)
+    metrics['Empirical Pink Noise RMS (hPa)'] = pink_noise_rms
+    
+    # 4. Empirical Resolution (Minimum non-zero difference)
     unique_vals = np.sort(df_32hz['Pressure (hPa)'].unique())
     diffs = np.diff(unique_vals)
     diffs = diffs[diffs > 1e-6] # Avoid floating point tiny diffs
@@ -641,7 +651,7 @@ def analyze_device_performance(df_32hz, device_info):
         score -= min(40, penalty)
     
     metrics['Reliability Score'] = max(0, score)
-    metrics['Noise Signal'] = noise
+    metrics['White Noise Signal'] = noise
     
     return metrics
 
