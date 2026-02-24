@@ -172,7 +172,7 @@ def main():
         duration_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         
         st.caption(f"**Thời gian đo:** {overview_date_str} (Từ {t_start.strftime('%H:%M:%S')} đến {t_end.strftime('%H:%M:%S')}). **Tổng thời gian:** {duration_str}")
-        st.caption(rf"**Thiết bị đo:** {device_info['Model']} | **Cảm biến Áp suất:** {device_info['Sensor']} | **Sai số phần cứng (Tolerance):** $\pm{tolerance}$ hPa")
+        st.caption(rf"**Thiết bị đo:** {device_info['Model']} | **Cảm biến Áp suất:** {device_info['Sensor']} | **Sai số NSX (Tolerance):** $\pm{tolerance}$ hPa | **Nhiễu nội suy từ dữ liệu (Actual Noise):** $\pm{emp_noise:.4f}$ hPa")
         st.caption(f"**Vị trí đo:** {location_info['City']}, {location_info['Region']}, {location_info['Country']} ({location_info['Latitude']}, {location_info['Longitude']}) | **Múi giờ:** {location_info['Timezone']}")
         
         # Plot downsampled if it's 32Hz to avoid massive browser lag
@@ -418,14 +418,14 @@ def main():
             wave_reliabilities = []
             for name, sig in filtered_signals.items():
                 amplitude = (sig.max() - sig.min()) / 2
-                snr = amplitude / noise_limit if noise_limit > 0 else 999
                 
-                if snr >= 3.0:
-                    status = "✅ Tốt"
-                elif snr >= 1.5:
-                    status = "🟡 TB"
-                else:
-                    status = "🔴 Kém"
+                snr_tol = amplitude / tol if tol > 0 else 999
+                snr_emp = amplitude / emp_noise if emp_noise > 0 else 999
+                
+                def get_status(snr):
+                    if snr >= 3.0: return "✅ Tốt"
+                    elif snr >= 1.5: return "🟡 TB"
+                    return "🔴 Kém"
                     
                 period_str = name.split('(')[1].replace('m)', '') if '(' in name else 'N/A'
                 
@@ -433,11 +433,13 @@ def main():
                     "Phân lớp": name.split(' ')[0],
                     "Chu kỳ Peak (m)": period_str,
                     "Biên độ (hPa)": f"{amplitude:.4f}",
-                    "Tỷ lệ Tín hiệu/Nhiễu": f"{snr:.1f}x",
-                    "Độ tin cậy đo lường": status
+                    "SNR (NSX)": f"{snr_tol:.1f}x",
+                    "Độ tin cậy (NSX)": get_status(snr_tol),
+                    "SNR (Nội suy)": f"{snr_emp:.1f}x",
+                    "Độ tin cậy (Nội suy)": get_status(snr_emp)
                 })
                 
-            st.markdown(f"**📊 Trạng thái thu sóng & Độ tin cậy (So với Cột nhiễu thiết bị: {noise_limit:.4f} hPa)**")
+            st.markdown(f"**📊 Phân tích Độ tin cậy (Sai số NSX: {tol:.4f} hPa | Nhiễu thực tế: {emp_noise:.5f} hPa)**")
             st.dataframe(pd.DataFrame(wave_reliabilities), use_container_width=True)
             
             macro_cols = [c for c in filtered_signals.keys() if 'Micro' not in c]
@@ -623,14 +625,15 @@ def main():
             
             for name, sig in filtered_signals.items():
                 amplitude = (sig.max() - sig.min()) / 2
-                snr = amplitude / noise_limit if noise_limit > 0 else 999
+                snr_tol = amplitude / tol if tol > 0 else 999
+                snr_emp = amplitude / emp_noise if emp_noise > 0 else 999
                 
-                if snr >= 3.0:
-                    wave_rec_html += f"<li>✅ <b>{name}:</b> Rất Tốt (SNR: {snr:.1f}x). Biên độ dao động vật lý vượt xa ngưỡng nhiễu phần cứng. Hoàn toàn tin cậy.</li>"
-                elif snr >= 1.5:
-                    wave_rec_html += f"<li>🟡 <b>{name}:</b> Cảnh Báo (SNR: {snr:.1f}x). Sóng bị mờ nhạt hoặc tiệm cận với biên độ của sàn nhiễu điện từ thiết bị.</li>"
+                if snr_emp >= 3.0:
+                    wave_rec_html += f"<li>✅ <b>{name}:</b> Rất Tốt (SNR Thực tế: {snr_emp:.1f}x | SNR NSX: {snr_tol:.1f}x). Biên độ dao động vật lý vượt xa ngưỡng nhiễu phần cứng. Hoàn toàn tin cậy.</li>"
+                elif snr_emp >= 1.5:
+                    wave_rec_html += f"<li>🟡 <b>{name}:</b> Cảnh Báo (SNR Thực tế: {snr_emp:.1f}x | SNR NSX: {snr_tol:.1f}x). Sóng bị mờ nhạt hoặc tiệm cận với biên độ của sàn nhiễu điện từ thiết bị.</li>"
                 else:
-                    wave_rec_html += f"<li>🔴 <b>{name}:</b> Suy thoái (SNR: {snr:.1f}x). Nhiễu máy đo ({noise_limit:.3f} hPa) dập tắt hoàn toàn bước sóng. Rất dễ bị diễn giải sai!</li>"
+                    wave_rec_html += f"<li>🔴 <b>{name}:</b> Suy thoái (SNR Thực tế: {snr_emp:.1f}x | SNR NSX: {snr_tol:.1f}x). Nhiễu máy đo ({emp_noise:.3f} hPa) dập tắt hoàn toàn bước sóng. Rất dễ bị diễn giải sai!</li>"
                     
             wave_rec_html += "</ul>"
             st.markdown(wave_rec_html, unsafe_allow_html=True)
