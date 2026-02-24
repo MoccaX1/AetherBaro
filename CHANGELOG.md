@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.13] - 2026-02-25
+### Features
+- feat: Refine noise floor calculation and spectral decomposition for improved wave detection and reliability assessment, introducing new analysis scripts. ([#bdfe95c](https://github.com/user/repo/commit/bdfe95c895bd12914878f8555b28c76e9f65bb48))
+
 ## [1.1.12] - 2026-02-24
 ### Bug Fixes
 - fix: streamline `st.dataframe` width handling in `app.py`. ([#f207ad0](https://github.com/user/repo/commit/f207ad004770175b0f565b20578737a5c8065018))
