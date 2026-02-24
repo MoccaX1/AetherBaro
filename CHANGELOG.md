@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.9] - 2026-02-24
+### Bug Fixes
+- fix: Amplitude Calculation for Long Waves in Layer 2 ([#710e960](https://github.com/user/repo/commit/710e9609a942056d6d3a1acbf1a05376f56f0add))
+
 ## [1.1.8] - 2026-02-23
 ### Bug Fixes
 - fix: Dynamically set data directory path for cross-platform compatibility and add an existence check with an error message. ([#0a7c46a](https://github.com/user/repo/commit/0a7c46a1e0e35a5cc7d4be990e51838169208964))
