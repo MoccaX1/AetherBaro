@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.12] - 2026-02-24
+### Bug Fixes
+- fix: streamline `st.dataframe` width handling in `app.py`. ([#f207ad0](https://github.com/user/repo/commit/f207ad004770175b0f565b20578737a5c8065018))
+
+### Chores
+- chore: add `skyfield` package ([#c5fc845](https://github.com/user/repo/commit/c5fc8451121d1a539d1692e4788e252e562939b5))
+
 ## [1.1.11] - 2026-02-24
 ### Features
 - feat: Add new pressure sample datasets and related analysis scripts, updating gitignore. ([#55684ce](https://github.com/user/repo/commit/55684ce776506fa5d5ee573bc3e159f0f3aaa210))
