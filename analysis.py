@@ -237,17 +237,18 @@ def analyze_layer_1(df_base, fs=1.0, location_data=None):
         tide_s2 = amp_s2 * np.cos(2 * np.pi * (t_hours - 10) / 12)
         # S1 wave peaks roughly at 5 AM (minimum temperature)
         tide_s1 = amp_s1 * np.cos(2 * np.pi * (t_hours - 5) / 24)
+        # S3 wave (terdiurnal): 8h period, peaks at ~6 AM, 2 PM, 10 PM
+        amp_s3 = amp_s2 * 0.08  # S3 is typically ~8% of S2 amplitude
+        tide_s3 = amp_s3 * np.cos(2 * np.pi * (t_hours - 6) / 8)
         
         # M2 wave is driven by the gravitational pull of the moon.
         # It peaks (high tide) when the moon transits the meridian (highest elevation)
-        # and also 12.42 hours later (on the opposite side of the earth, often lowest negative elevation).
-        # We model this roughly as peaking when |elevation| is maximum.
-        # Since Moon elevation goes from approx -90 to +90, cos(2 * zenith_angle) maps this:
+        # and also 12.42 hours later (on the opposite side of the earth).
         zenith_angle_rad = np.radians(90.0 - m_elev)
-        tide_m2 = amp_m2 * np.cos(2 * zenith_angle_rad) # High tide when zenith is 0 or 180 (elev 90 or -90)
+        tide_m2 = amp_m2 * np.cos(2 * zenith_angle_rad)
         
         # Total Theoretical Tide offset
-        theoretic_sparse.append(tide_s1 + tide_s2 + tide_m2)
+        theoretic_sparse.append(tide_s1 + tide_s2 + tide_s3 + tide_m2)
         
     # Interpolate back to full high-resolution array
     if len(sparse_t) > 1:
@@ -380,33 +381,52 @@ def analyze_layer_2(df_base, fs=1.0):
     power_valid = power[valid_idx]
     
     # 2. Define physical search windows for wave types
-    search_windows = {
-        'Boss': (140, 200, 0.1),    # Boss: Long macro trend
-        'Mother': (70, 95, 0.15),   # Mother wave
-        'Child': (35, 48, 0.15),    # Child harmonic
-        'Micro': (10, 25, 0.2)      # Micro thermal turbulence
+    # Duration-aware: only search for waves whose period can be resolved by the recording
+    duration_s = (df_base['Datetime'].iloc[-1] - df_base['Datetime'].iloc[0]).total_seconds()
+    duration_min = duration_s / 60.0
+    
+    # A wave needs at least 1 full cycle to be detectable.
+    # For reliability, we require at least 0.75 of a period.
+    max_detectable_period = duration_min / 0.75
+    
+    # Full wave catalog: from micro-turbulence to tidal harmonics
+    # Format: (min_period, max_period, bandwidth_ratio)
+    all_search_windows = {
+        # Tidal Harmonics (only for long recordings)
+        'S3 Tide':  (420, 540, 0.12),   # S3: 8h = 480m. Need > 6h recording
+        'S4 Tide':  (320, 420, 0.12),   # S4: 6h = 360m. Need > 4.5h recording
+        # Gravity Wave hierarchy
+        'Boss':     (140, 320, 0.12),   # Boss: extended to cover 140-320m gap
+        'Mother':   (60, 140, 0.15),    # Mother wave
+        'Child':    (30, 60, 0.15),     # Child harmonic
+        'Micro':    (10, 30, 0.2)       # Micro thermal turbulence
     }
     
     dynamic_bands = {}
     
-    for name, (min_p, max_p, bw_ratio) in search_windows.items():
+    for name, (min_p, max_p, bw_ratio) in all_search_windows.items():
+        # Skip bands whose minimum period exceeds what the recording can resolve
+        if min_p > max_detectable_period:
+            continue
+            
+        # Clamp the search window to the detectable range
+        effective_max_p = min(max_p, max_detectable_period)
+        
         # Mask out periods within the specific window
-        mask = (periods_min >= min_p) & (periods_min <= max_p)
+        mask = (periods_min >= min_p) & (periods_min <= effective_max_p)
         
         if np.any(mask):
-            # Find the period carrying maximum power in each designated physical window
+            # Find the period carrying maximum power for labeling
             best_idx = np.argmax(power_valid[mask])
             true_peak = periods_min[mask][best_idx]
-            
-            # Create a dynamic band around this true peak
-            low_p = true_peak * (1 - bw_ratio)
-            high_p = true_peak * (1 + bw_ratio)
         else:
-            # Fallback to default center if the window is completely empty
-            center = (min_p + max_p) / 2
-            low_p = center * (1 - bw_ratio)
-            high_p = center * (1 + bw_ratio)
-            true_peak = center
+            true_peak = (min_p + effective_max_p) / 2
+            
+        # USE THE FULL SEARCH WINDOW as the bandpass filter range
+        # This ensures ALL energy within the physical band is captured,
+        # not just a narrow slice around the peak.
+        low_p = min_p
+        high_p = effective_max_p
             
         # Convert period (minutes) to frequencies (Hz) for the filter
         low_f = 1 / (high_p * 60)
@@ -416,42 +436,52 @@ def analyze_layer_2(df_base, fs=1.0):
             'freqs': (low_f, high_f),
             'period_range': (low_p, high_p),
             'peak': true_peak,
-            'base_name': name
+            'base_name': name.split()[0]  # 'S3', 'S4', 'Boss', etc.
         }
         
-    # 2.5 Find if there's a massive peak outside our predefined windows using find_peaks to ensure it's a real anomaly
+    # 2.5 Find ALL significant peaks outside our predefined windows (multi-wildcard)
     from scipy.signal import find_peaks
     power_smoothed = gaussian_filter1d(power_valid, sigma=2)
-    peaks, _ = find_peaks(power_smoothed, distance=10)
+    peaks, properties = find_peaks(power_smoothed, distance=10, prominence=np.max(power_smoothed) * 0.05)
     peak_periods = periods_min[peaks]
     peak_powers = power_smoothed[peaks]
     
-    if len(peak_periods) > 0:
-        global_max_idx = np.argmax(peak_powers)
-        global_peak_p = peak_periods[global_max_idx]
+    # Sort by power descending
+    sorted_idx = np.argsort(peak_powers)[::-1]
+    wildcard_count = 0
+    max_wildcards = 3  # Allow up to 3 uncategorized peaks
+    
+    for idx in sorted_idx:
+        if wildcard_count >= max_wildcards:
+            break
+            
+        p = peak_periods[idx]
         
-        # Check if this global peak is already captured by any of our dynamic bands
+        # Skip if too short or already captured by a named band
+        if p < 5:
+            continue
+            
         is_captured = False
         for info in dynamic_bands.values():
             low_p, high_p = info['period_range']
-            if low_p <= global_peak_p <= high_p:
+            if low_p <= p <= high_p:
                 is_captured = True
                 break
                 
-        if not is_captured and global_peak_p >= 5: # Ignore super high freq noise
-            # Create a wildcard band for this unexpected dominant wave
+        if not is_captured:
             bw_ratio = 0.15
-            low_p = global_peak_p * (1 - bw_ratio)
-            high_p = global_peak_p * (1 + bw_ratio)
+            low_p = p * (1 - bw_ratio)
+            high_p = p * (1 + bw_ratio)
             low_f = 1 / (high_p * 60)
             high_f = 1 / (low_p * 60)
             
-            dynamic_bands[f"Wildcard Peak ({global_peak_p:.1f}m)"] = {
+            dynamic_bands[f"Wildcard Peak ({p:.1f}m)"] = {
                 'freqs': (low_f, high_f),
                 'period_range': (low_p, high_p),
-                'peak': global_peak_p,
+                'peak': p,
                 'base_name': 'Wildcard'
             }
+            wildcard_count += 1
     
     # 3. Filter the signals using the newly discovered dynamic bands
     filtered_signals = {}
@@ -460,8 +490,9 @@ def analyze_layer_2(df_base, fs=1.0):
         # Use FFT bandpass to guarantee numeric stability for ultra-low frequencies
         filtered_signals[label] = fft_bandpass_filter(data, low_f, high_f, fs)
         
-    # Extract exact global peak period (between 10m and 300m)
-    global_mask = (periods_min >= 10) & (periods_min <= 300)
+    # Extract exact global peak period (dynamic range based on file duration)
+    max_search = min(max_detectable_period, 600)  # Cap at 10h to avoid synoptic artifacts
+    global_mask = (periods_min >= 10) & (periods_min <= max_search)
     if global_mask.any():
         global_peak_idx = np.argmax(power_valid[global_mask])
         exact_peak_period = periods_min[global_mask][global_peak_idx]
@@ -615,10 +646,14 @@ def analyze_device_performance(df_32hz, device_info):
     data = df_32hz['Pressure (hPa)'].ffill().bfill().values
     fs = 32.0
     
-    # Detrend to remove macro synoptic trend
-    # Use simple mean subtraction instead of 2nd order polyfit
-    # 2nd order polyfit aggressively destroys the VLF band (>160m) making Drift appear as 0.0!
-    p_detrend = data - np.mean(data)
+    # Detrend to remove the linear Synoptic trend (Rising/Falling pressure over hours)
+    # Order 1 (Linear): Removes the gross atmospheric trend slope without destroying
+    # the VLF sensor drift curvature that polyfit(2) would erase.
+    # Mean subtraction is too weak (leaves 1+ hPa synoptic change in VLF band).
+    # Polyfit(2) is too strong (erases real sensor drift completely, giving 0.0).
+    # Linear detrend is the Goldilocks zone.
+    poly = np.polyfit(time_s, data, 1)
+    p_detrend = data - np.polyval(poly, time_s)
     
     # Use Welch method for Power Spectral Density
     from scipy.signal import welch

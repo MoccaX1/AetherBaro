@@ -514,13 +514,20 @@ def main():
             st.plotly_chart(fig_waves_usable, width="stretch")
             
             df_fft = pd.DataFrame({'Period (minutes)': periods_min, 'Power': power_valid})
-            df_fft = df_fft[(df_fft['Period (minutes)'] >= 10) & (df_fft['Period (minutes)'] <= 300)]
+            # Dynamic X-axis range based on detected bands
+            max_band_period = max((info['period_range'][1] for info in dynamic_bands.values()), default=300)
+            fft_max_period = max(300, max_band_period * 1.15)  # At least 300m, or 15% beyond the widest band
+            df_fft = df_fft[(df_fft['Period (minutes)'] >= 10) & (df_fft['Period (minutes)'] <= fft_max_period)]
             
             fig_fft = px.line(df_fft, x='Period (minutes)', y='Power', log_y=True, 
                               title="Phổ năng lượng (Zero-padded FFT)", template="plotly_dark", render_mode="svg")
             
             # Draw dynamic bands
-            color_map = {'Boss': 'red', 'Mother': 'green', 'Child': 'blue', 'Micro': 'orange', 'Wildcard': 'purple'}
+            color_map = {
+                'S3': 'cyan', 'S4': 'magenta',
+                'Boss': 'red', 'Mother': 'green', 'Child': 'blue', 
+                'Micro': 'orange', 'Wildcard': 'purple'
+            }
             for info in dynamic_bands.values():
                 low_p, high_p = info['period_range']
                 base_name = info['base_name']
