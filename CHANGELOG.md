@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.14] - 2026-02-26
+### Features
+- feat: Add spectral detrending verification script and improve tidal model with S3 component and duration-aware wave search windows. ([#0448ebc](https://github.com/user/repo/commit/0448ebc4c394a05ae152b387c045fad3d94e7a90))
+
 ## [1.1.13] - 2026-02-25
 ### Features
 - feat: Refine noise floor calculation and spectral decomposition for improved wave detection and reliability assessment, introducing new analysis scripts. ([#bdfe95c](https://github.com/user/repo/commit/bdfe95c895bd12914878f8555b28c76e9f65bb48))
