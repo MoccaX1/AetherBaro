@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.15] - 2026-02-27
+### Features
+- feat: Implement multi-method spectral analysis including FFT, PSD, STFT, CWT, and HHT for wave detection, along with new helper functions and diagnostic files. ([#6a6cbfd](https://github.com/user/repo/commit/6a6cbfd21d11ddd4232c326624481b515385919c))
+
 ## [1.1.14] - 2026-02-26
 ### Features
 - feat: Add spectral detrending verification script and improve tidal model with S3 component and duration-aware wave search windows. ([#0448ebc](https://github.com/user/repo/commit/0448ebc4c394a05ae152b387c045fad3d94e7a90))
