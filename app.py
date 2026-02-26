@@ -7,6 +7,12 @@ from analysis import (
     load_and_preprocess_data, 
     analyze_layer_1, 
     analyze_layer_2,
+    detect_waves_fft,
+    detect_waves_psd,
+    detect_waves_stft,
+    detect_waves_cwt,
+    detect_waves_hht,
+    compute_wave_consensus,
     analyze_layer_3,
     analyze_layer_4,
     analyze_layer_5,
@@ -411,135 +417,154 @@ def main():
             st.plotly_chart(fig_astro, width="stretch")
             
         with tab2:
-            st.header("2. Hệ thống Sóng (Boss/Mother/Child)", help="Dùng phân tích phổ biến đổi Fourier (FFT) và lưới lọc kỹ thuật số (Bandpass) để tách sóng áp suất khổng lồ thành nhiều dải Sóng Trọng trường vi mô (Gravity Waves) xếp chồng lên nhau do địa hình hoặc mây giông tạo ra.")
+            st.header("2. Pho Song Da Phuong Phap (Multi-Method Wave Analysis)", help="5 phuong phap doc lap phat hien song khi quyen. Tab Tong hop bieu quyet da so.")
             filtered_signals, freqs, power, periods_min, power_valid, exact_peak_period, dynamic_bands = analyze_layer_2(df_base, fs=fs)
-            
             df_waves = df_base[['Datetime']].copy()
             for name, sig in filtered_signals.items():
                 df_waves[name] = sig
-                
             df_waves_plot = df_waves.iloc[::plot_step] if fs > 1.0 else df_waves
-            
-            # --- WAVE RELIABILITY ASSESSMENT ---
-            wave_reliabilities = []
-            
-            # File duration in minutes
             total_duration_mins = duration.total_seconds() / 60
-            
-            for name, sig in filtered_signals.items():
-                amplitude = (sig.max() - sig.min()) / 2
-                
-                snr_tol = amplitude / tol if tol > 0 else 999
-                # True dynamic noise floor is Turbulence + White Noise. VLF Drift is a slow baseline, it does NOT mask mesoscale waves.
-                dynamic_noise_floor = emp_turb + emp_white_noise
-                snr_emp = amplitude / dynamic_noise_floor if dynamic_noise_floor > 0 else 999
-                
-                def get_status(snr):
-                    if snr >= 3.0: return "✅ Tốt"
-                    elif snr >= 1.5: return "🟡 TB"
-                    return "🔴 Kém"
-                    
-                period_str = name.split('(')[1].replace('m)', '') if '(' in name else 'N/A'
-                try: period_val = float(period_str)
-                except ValueError: period_val = 0
-                
-                is_hypothetical = period_val > total_duration_mins
-                prefix = "🌫️ [Giả định] " if is_hypothetical else ""
-                
-                wave_reliabilities.append({
-                    "Phân lớp": prefix + name.split(' ')[0],
-                    "Chu kỳ Peak (m)": period_str,
-                    "Biên độ (hPa)": f"{amplitude:.4f}",
-                    "SNR (NSX)": f"{snr_tol:.1f}x",
-                    "Độ tin cậy (NSX)": get_status(snr_tol),
-                    "SNR (Nội suy)": f"{snr_emp:.1f}x",
-                    "Độ tin cậy (Nội suy)": get_status(snr_emp)
-                })
-                
-            st.markdown(f"**📊 Phân tích Độ tin cậy (Sai số NSX: {tol:.4f} hPa | Sàn nhiễu Động (Turb+Trắng): {dynamic_noise_floor:.5f} hPa)**")
-            st.dataframe(pd.DataFrame(wave_reliabilities), width="stretch")
-            
-            macro_cols = [c for c in filtered_signals.keys() if 'Micro' not in c]
-            micro_cols = [c for c in filtered_signals.keys() if 'Micro' in c]
-            
-            # 1. Combined Plot (All Waves)
-            fig_waves_combined = px.line(df_waves_plot, x='Datetime', y=list(filtered_signals.keys()), 
-                                         title="Tất cả Dải Sóng Kết Hợp (Macro + Micro)", template="plotly_dark", render_mode="svg")
-            fig_waves_combined.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
-            draw_tide_blocks(fig_waves_combined, l1_max_blocks, None, '#ff4b4b', 'Pmax', 'top')
-            draw_tide_blocks(fig_waves_combined, l1_min_blocks, None, '#00d4ff', 'Pmin', 'top')
-            draw_tide_blocks(fig_waves_combined, tide_max_blocks, None, '#ffaa00', 'Tide Max', 'top')
-            draw_tide_blocks(fig_waves_combined, tide_min_blocks, None, '#ffaa00', 'Tide Min', 'top')
-            fig_waves_combined.update_xaxes(title=None)
-            st.plotly_chart(fig_waves_combined, width="stretch")
-                
-            # 2. Biểu đồ Khả dụng Cuối cùng (Usability Chart)
-            # Differentiate waves that survive the Pink Noise (Drift) test
-            fig_waves_usable = px.line(df_waves_plot, x='Datetime', y=list(filtered_signals.keys()), 
-                                       title="Biểu đồ Khả dụng Cuối cùng (Đã lọc qua nền Nhiễu Trôi 1/f)", template="plotly_dark", render_mode="svg")
-            
-            for trace in fig_waves_usable.data:
-                name = trace.name
-                sig = filtered_signals[name]
-                amplitude = (sig.max() - sig.min()) / 2
-                
-                period_str = name.split('(')[1].replace('m)', '') if '(' in name else '0'
-                try: period_val = float(period_str)
-                except ValueError: period_val = 0
-                
-                is_hypothetical = period_val > total_duration_mins
-                # Use dynamic_noise_floor (Turbulence + White Noise) as the hard noise floor
-                dynamic_noise_floor = emp_turb + emp_white_noise
-                is_below_noise = amplitude < dynamic_noise_floor
-                
-                if is_hypothetical or is_below_noise:
-                    trace.line.dash = 'dot'
-                    trace.opacity = 0.3 # Fade out unverified signals
-                else:
-                    trace.line.width = 2
-                    trace.opacity = 1.0 # Highlight verified signals
-                    
-            fig_waves_usable.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
-            draw_tide_blocks(fig_waves_usable, l1_max_blocks, None, '#ff4b4b', 'Pmax', 'top')
-            draw_tide_blocks(fig_waves_usable, l1_min_blocks, None, '#00d4ff', 'Pmin', 'top')
-            draw_tide_blocks(fig_waves_usable, tide_max_blocks, None, '#ffaa00', 'Tide Max', 'top')
-            draw_tide_blocks(fig_waves_usable, tide_min_blocks, None, '#ffaa00', 'Tide Min', 'top')
-            
-            # Add the Dynamic Noise floor as a visual threshold boundary
             dynamic_noise_floor = emp_turb + emp_white_noise
-            fig_waves_usable.add_hline(y=dynamic_noise_floor, line_dash="dash", line_color="rgba(255, 255, 255, 0.5)", annotation_text="+ Sàn Nhiễu (Turbulence + Trắng)")
-            fig_waves_usable.add_hline(y=-dynamic_noise_floor, line_dash="dash", line_color="rgba(255, 255, 255, 0.5)", annotation_text="- Sàn Nhiễu (Turbulence + Trắng)")
-            
-            fig_waves_usable.update_xaxes(title=None)
-            st.plotly_chart(fig_waves_usable, width="stretch")
-            
-            df_fft = pd.DataFrame({'Period (minutes)': periods_min, 'Power': power_valid})
-            # Dynamic X-axis range based on detected bands
             max_band_period = max((info['period_range'][1] for info in dynamic_bands.values()), default=300)
-            fft_max_period = max(300, max_band_period * 1.15)  # At least 300m, or 15% beyond the widest band
-            df_fft = df_fft[(df_fft['Period (minutes)'] >= 10) & (df_fft['Period (minutes)'] <= fft_max_period)]
+            fft_max_period = max(300, max_band_period * 1.15)
+            color_map = {'S3': 'cyan', 'S4': 'magenta', 'Boss': 'red', 'Mother': 'green', 'Child': 'blue', 'Micro': 'orange', 'Wildcard': 'purple'}
             
-            fig_fft = px.line(df_fft, x='Period (minutes)', y='Power', log_y=True, 
-                              title="Phổ năng lượng (Zero-padded FFT)", template="plotly_dark", render_mode="svg")
+            with st.spinner("Dang chay 5 phuong phap phan tich pho..."):
+                result_fft = detect_waves_fft(df_base, fs=fs)
+                result_psd = detect_waves_psd(df_base, fs=fs)
+                result_stft = detect_waves_stft(df_base, fs=fs)
+                result_cwt = detect_waves_cwt(df_base, fs=fs)
+                result_hht = detect_waves_hht(df_base, fs=fs)
+                all_results = [result_fft, result_psd, result_stft, result_cwt, result_hht]
+                consensus = compute_wave_consensus(all_results)
             
-            # Draw dynamic bands
-            color_map = {
-                'S3': 'cyan', 'S4': 'magenta',
-                'Boss': 'red', 'Mother': 'green', 'Child': 'blue', 
-                'Micro': 'orange', 'Wildcard': 'purple'
-            }
-            for info in dynamic_bands.values():
-                low_p, high_p = info['period_range']
-                base_name = info['base_name']
-                color = color_map.get(base_name, 'gray')
-                fig_fft.add_vrect(x0=low_p, x1=high_p, fillcolor=color, opacity=0.15, line_width=0, annotation_text=base_name)
+            stab_con, stab_fft, stab_psd, stab_stft, stab_cwt, stab_hht = st.tabs(["Tong hop", "FFT", "PSD Welch", "STFT", "CWT", "HHT/EMD"])
             
-            if exact_peak_period is not None:
-                fig_fft.add_vline(x=exact_peak_period, line_width=2, line_dash="dash", line_color="white")
-                fig_fft.add_annotation(x=exact_peak_period, y=0.95, yref="paper", text=f"Peak: {exact_peak_period:.2f}m", showarrow=True, arrowhead=2, font=dict(color="white"))
+            def draw_spectrum(result, ct):
+                if 'periods' not in result: return
+                df_s = pd.DataFrame({'Period (min)': result['periods'], 'Power': result['power']})
+                df_s = df_s[(df_s['Period (min)'] >= 10) & (df_s['Period (min)'] <= fft_max_period)]
+                fig = px.line(df_s, x='Period (min)', y='Power', log_y=True, title=f"Pho nang luong: {result['method']}", template="plotly_dark", render_mode="svg")
+                for info in dynamic_bands.values():
+                    lp, hp = info['period_range']; bn = info['base_name']
+                    fig.add_vrect(x0=lp, x1=hp, fillcolor=color_map.get(bn,'gray'), opacity=0.10, line_width=0)
+                for i, w in enumerate(result['waves'][:6]):
+                    p = w['period_min']
+                    if 10 <= p <= fft_max_period:
+                        fig.add_vline(x=p, line_dash="dot", line_color="white", opacity=0.7)
+                        fig.add_annotation(x=p, y=1.0-i*0.08, yref="paper", text=f"{p:.1f}m", showarrow=True, arrowhead=2, font=dict(color="white", size=10))
+                fig.update_xaxes(title=None); fig.update_yaxes(title=result.get('ylabel','Power'))
+                ct.plotly_chart(fig, width="stretch")
                 
-            fig_fft.update_xaxes(title=None)
-            st.plotly_chart(fig_fft, width="stretch")
+                # Bảng thống kê tần số phát hiện
+                if result['waves']:
+                    ct.markdown(f"**Danh sach Dinh song ({result['method']}):**")
+                    ct.dataframe(pd.DataFrame([{"Xep hang": f"#{i+1}", "Chu ky (min)": f"{w['period_min']:.1f}", "Bien do (hPa)": f"{w.get('amplitude',0):.5f}", "Nang luong": f"{w.get('power',0):.5f}"} for i, w in enumerate(result['waves'][:6])]), width="stretch")
+            
+            def draw_heatmap(result, ct, title):
+                import plotly.graph_objects as go
+                sd = result.get('spectrogram') or result.get('scalogram')
+                if sd is None: return
+                pm = sd['periods_min']; pmask = (pm >= 10) & (pm <= fft_max_period)
+                if not np.any(pmask): return
+                pm_filtered = pm[pmask]
+                z_data = sd['power_db'][pmask, :]
+                fig = go.Figure(data=go.Heatmap(z=z_data, x=sd['time_hours'], y=pm_filtered, colorscale='Magma', colorbar=dict(title='dB')))
+                for w in result['waves'][:5]:
+                    p = w['period_min']
+                    if 10 <= p <= fft_max_period:
+                        fig.add_hline(y=p, line_dash='dash', line_color='white', opacity=0.5, annotation_text=f"{p:.0f}m", annotation_font_color='white')
+                
+                # Adaptive Y-axis: bound by actual data range (with small padding in log space)
+                # Use where the data actually has energy (above 10% percentile of dB)
+                energy_thresh = np.percentile(z_data, 15)
+                hot_rows = np.any(z_data >= energy_thresh, axis=1)
+                if np.any(hot_rows):
+                    y_lo = max(pm_filtered[hot_rows].min() * 0.7, 10)
+                    y_hi = min(pm_filtered[hot_rows].max() * 1.4, fft_max_period)
+                else:
+                    y_lo = pm_filtered.min()
+                    y_hi = pm_filtered.max()
+                
+                import math
+                fig.update_layout(
+                    title=title, xaxis_title="Thoi gian (gio)", yaxis_title="Chu ky (phut)",
+                    yaxis=dict(type='log', range=[math.log10(max(y_lo, 1)), math.log10(max(y_hi, y_lo+1))]),
+                    template='plotly_dark', height=480
+                )
+                ct.plotly_chart(fig, width="stretch")
+                ct.caption(f"Truc Y (log): {y_lo:.0f} - {y_hi:.0f} min | Vung sang = song co energy manh.")
+            
+            with stab_con:
+                st.subheader("Bieu quyet Da so (5 Phuong phap)")
+                if consensus:
+                    st.dataframe(pd.DataFrame([{"": c['icon'], "Chu ky (min)": f"{c['period_min']:.1f}", "Bien do TB": f"{c['amplitude']:.5f}", "Xac nhan": f"{c['n_methods']}/5", "Tin cay": c['confidence'], "Cac PP": ", ".join(c['methods'])} for c in consensus]), width="stretch")
+                n_conf = sum(1 for c in consensus if c['n_methods'] >= 3)
+                st.metric("Song xac nhan (>=3/5 PP)", f"{n_conf}/{len(consensus)}")
+                st.markdown(f"**Do tin cay (NSX: {tol:.4f} hPa | San nhieu: {dynamic_noise_floor:.5f} hPa)**")
+                wr = []
+                for name, sig in filtered_signals.items():
+                    amp = (sig.max()-sig.min())/2; snr_t = amp/tol if tol>0 else 999; snr_e = amp/dynamic_noise_floor if dynamic_noise_floor>0 else 999
+                    def gs(s): return "✅" if s>=3 else ("🟡" if s>=1.5 else "🔴")
+                    ps = name.split('(')[1].replace('m)','') if '(' in name else '0'
+                    try: pv=float(ps)
+                    except: pv=0
+                    wr.append({"Lop": ("🌫️ " if pv>total_duration_mins else "")+name.split(' ')[0], "T(m)": ps, "Amp": f"{amp:.4f}", "SNR_NSX": f"{snr_t:.1f}x", "SNR_Emp": f"{snr_e:.1f}x", "": gs(snr_e)})
+                st.dataframe(pd.DataFrame(wr), width="stretch")
+                fig_c = px.line(df_waves_plot, x='Datetime', y=list(filtered_signals.keys()), title="Tat ca Dai Song Ket Hop", template="plotly_dark", render_mode="svg")
+                fig_c.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
+                draw_tide_blocks(fig_c, l1_max_blocks, None, '#ff4b4b', 'Pmax', 'top'); draw_tide_blocks(fig_c, l1_min_blocks, None, '#00d4ff', 'Pmin', 'top')
+                fig_c.update_xaxes(title=None); st.plotly_chart(fig_c, width="stretch")
+            
+            with stab_fft:
+                st.subheader("Phuong phap 1: FFT (Fast Fourier Transform)")
+                st.caption("Zero-padded FFT. Do nhay cao nhat, nhung cung nhieu 'gai' nhieu nhat.")
+                draw_spectrum(result_fft, st)
+                # Usability chart
+                fig_u = px.line(df_waves_plot, x='Datetime', y=list(filtered_signals.keys()), title="Bieu do Kha dung (Da loc San Nhieu)", template="plotly_dark", render_mode="svg")
+                for tr in fig_u.data:
+                    s = filtered_signals[tr.name]; a = (s.max()-s.min())/2
+                    ps = tr.name.split('(')[1].replace('m)','') if '(' in tr.name else '0'
+                    try: pv=float(ps)
+                    except: pv=0
+                    if pv>total_duration_mins or a<dynamic_noise_floor: tr.line.dash='dot'; tr.opacity=0.3
+                    else: tr.line.width=2; tr.opacity=1.0
+                fig_u.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
+                fig_u.add_hline(y=dynamic_noise_floor, line_dash="dash", line_color="rgba(255,255,255,0.5)", annotation_text="+ San Nhieu")
+                fig_u.add_hline(y=-dynamic_noise_floor, line_dash="dash", line_color="rgba(255,255,255,0.5)", annotation_text="- San Nhieu")
+                fig_u.update_xaxes(title=None); st.plotly_chart(fig_u, width="stretch")
+            
+            with stab_psd:
+                st.subheader("Phuong phap 2: PSD Welch")
+                st.caption("Lam min nhieu bang trung binh Welch. Dinh nhon = song ben vung.")
+                draw_spectrum(result_psd, st)
+            
+            with stab_stft:
+                st.subheader("Phuong phap 3: STFT (Spectrogram)")
+                st.caption("Ban do Thoi gian-Tan so. Vung sang ngang = song ben vung.")
+                draw_spectrum(result_stft, st)
+                draw_heatmap(result_stft, st, "Spectrogram")
+            
+            with stab_cwt:
+                st.subheader("Phuong phap 4: CWT (Continuous Wavelet Transform)")
+                st.caption("Wavelet Morlet: co gian cua so theo tan so.")
+                draw_spectrum(result_cwt, st)
+                draw_heatmap(result_cwt, st, "Scalogram")
+            
+            with stab_hht:
+                st.subheader("Phuong phap 5: HHT/EMD (Hilbert-Huang Transform)")
+                st.caption("Phan tach song thanh IMF roi tinh tan so tuc thoi.")
+                if result_hht.get('imfs'):
+                    for imf_d in result_hht['imfs'][:6]:
+                        idx = imf_d['imf_index']; per = imf_d['median_period_min']; amp = imf_d['mean_amplitude']
+                        fig_i = px.line(x=imf_d['time_hours'], y=imf_d['signal'], title=f"IMF {idx+1}: ~{per:.1f}min | ~{amp:.5f} hPa", template="plotly_dark", render_mode="svg")
+                        fig_i.update_layout(height=200, margin=dict(t=30, b=10)); fig_i.update_xaxes(title="Gio"); fig_i.update_yaxes(title="hPa")
+                        st.plotly_chart(fig_i, width="stretch")
+                    if result_hht['waves']:
+                        st.dataframe(pd.DataFrame([{"IMF": f"#{w.get('imf_index',0)+1}", "Chu ky (min)": f"{w['period_min']:.1f}", "Bien do": f"{w.get('amplitude',0):.5f}"} for w in result_hht['waves'][:6]]), width="stretch")
+                else:
+                    st.warning("EMD khong the phan tach tin hieu nay.")
+            
             
         with tab3:
             st.header("3. Trạng thái Khí quyển (Atmosphere State)", help="Khảo sát độ hỗn loạn (Turbulence) và độ tĩnh lặng của dòng chảy không khí. Càng hỗn loạn (Entropy cao) hệ thống khí quyển cành bất ổn định (có thể giông lốc).")

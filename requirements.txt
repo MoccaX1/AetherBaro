@@ -7,3 +7,5 @@ requests>=2.31.0
 astral>=3.2
 lunardate>=0.2.2
 skyfield>=1.40
+PyWavelets>=1.4
+EMD-signal>=1.4

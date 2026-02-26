@@ -501,7 +501,439 @@ def analyze_layer_2(df_base, fs=1.0):
     
     return filtered_signals, freqs, power, periods_min, power_valid, exact_peak_period, dynamic_bands
 
-# --- Layer 3: Atmospheric State ---
+# --- Layer 2 Extensions: Multi-Method Spectral Analysis ---
+
+def _detrend_linear(data, fs):
+    """Common linear detrending for all methods."""
+    time_s = np.arange(len(data)) / fs
+    poly = np.polyfit(time_s, data, 1)
+    return data - np.polyval(poly, time_s)
+
+def _find_spectral_peaks(periods, power, min_period=10, max_period=600, prominence_ratio=0.05):
+    """Common peak detection on a spectrum. Returns list of dicts with period & amplitude."""
+    from scipy.signal import find_peaks
+    mask = (periods >= min_period) & (periods <= max_period)
+    if not np.any(mask):
+        return []
+    p_masked = periods[mask]
+    pw_masked = power[mask]
+    
+    # Sort to ascending period order — required for find_peaks to work correctly.
+    # FFT/PSD/STFT all return arrays in descending period order (low freq first).
+    # In descending order, short-period waves sit on a trailing slope and find_peaks
+    # cannot detect them as local maxima.
+    sort_idx = np.argsort(p_masked)
+    p_masked = p_masked[sort_idx]
+    pw_masked = pw_masked[sort_idx]
+    
+    # Convert to log10 scale for peak detection
+    # This prevents a dominant low-frequency tidal peak (e.g., S3 at power=7000)
+    # from setting an impossibly high prominence threshold that silences all other waves.
+    # In log-space, S3 (log10=3.9) and Boss (log10=1.5) have comparable prominence.
+    pw_log = np.log10(np.maximum(pw_masked, 1e-20))
+    pw_smooth = gaussian_filter1d(pw_log, sigma=2)  # sigma=2 for slightly more smoothing
+    
+    # prominence_ratio is now relative to the log-space range, not linear max
+    log_range = pw_smooth.max() - pw_smooth.min()
+    min_prominence = log_range * prominence_ratio
+    
+    peaks, props = find_peaks(pw_smooth, distance=5, prominence=max(min_prominence, 0.05))
+    
+    results = []
+    for idx in peaks:
+        period = p_masked[idx]
+        pw_val = pw_masked[idx]  # Use original linear power for amplitude
+        # Estimate amplitude: sqrt(2 * PSD * df)
+        if len(p_masked) > 1:
+            df_val = np.abs(np.median(np.diff(1.0 / (p_masked * 60))))
+            amp = np.sqrt(2 * pw_val * df_val)
+        else:
+            amp = np.sqrt(pw_val)
+        results.append({
+            'period_min': float(period),
+            'power': float(pw_val),
+            'amplitude': float(amp)
+        })
+    
+    # Sort by power descending, keep top 8
+    results.sort(key=lambda x: x['power'], reverse=True)
+    return results[:8]
+
+
+def detect_waves_fft(df_base, fs=1.0):
+    """
+    Method 1: Zero-padded FFT.
+    Returns: dict with 'waves' (list of detected peaks), 'periods', 'power' (for plotting).
+    """
+    data = df_base['Pressure (hPa)'].values
+    freqs, power = compute_zero_padded_fft(data, fs, pad_factor=8)
+    valid = freqs > 0
+    periods_min = (1.0 / freqs[valid]) / 60.0
+    power_valid = power[valid]
+    
+    duration_s = len(data) / fs
+    max_period = min((duration_s / 60.0) / 0.75, 600)
+    
+    waves = _find_spectral_peaks(periods_min, power_valid,
+                                  min_period=10, max_period=max_period,
+                                  prominence_ratio=0.03)
+    
+    return {
+        'method': 'FFT',
+        'waves': waves,
+        'periods': periods_min,
+        'power': power_valid,
+        'ylabel': 'FFT Power'
+    }
+
+
+def detect_waves_psd(df_base, fs=1.0):
+    """
+    Method 2: PSD via zero-padded periodogram with log-space smoothing.
+    Uses the full N-length window (no Welch averaging) so ALL wave periods are resolved.
+    Noise rejection is achieved by stronger Gaussian smoothing in log-space.
+    """
+    from scipy.signal import periodogram
+    data = df_base['Pressure (hPa)'].values
+    p_detrend = _detrend_linear(data, fs)
+    
+    duration_s = len(data) / fs
+    max_period = min((duration_s / 60.0) / 0.75, 600)
+    
+    # Zero-padded periodogram: gives dense frequency grid, same approach as the FFT method
+    # but normalized as PSD (power / Hz). Zero-pad 4x for sub-bin resolution.
+    nfft = len(p_detrend) * 4
+    f_psd, psd_vals = periodogram(p_detrend, fs, nfft=nfft, window='hann')
+    
+    valid = f_psd > 0
+    periods_min = (1.0 / f_psd[valid]) / 60.0
+    psd_valid = psd_vals[valid]
+    
+    # Sort ascending period for _find_spectral_peaks
+    sort_idx = np.argsort(periods_min)
+    periods_min = periods_min[sort_idx]
+    psd_valid = psd_valid[sort_idx]
+    
+    waves = _find_spectral_peaks(periods_min, psd_valid,
+                                  min_period=10, max_period=max_period,
+                                  prominence_ratio=0.03)
+    
+    return {
+        'method': 'PSD Welch',
+        'waves': waves,
+        'periods': periods_min,
+        'power': psd_valid,
+        'ylabel': 'Power Density (hPa\u00b2/Hz)'
+    }
+
+
+def detect_waves_stft(df_base, fs=1.0):
+    """
+    Method 3: STFT Spectrogram.
+    Detects waves by averaging power across time bins — persistent energy = real wave.
+    Returns spectrogram data + detected waves.
+    """
+    from scipy.signal import spectrogram
+    data = df_base['Pressure (hPa)'].values
+    p_detrend = _detrend_linear(data, fs)
+    
+    duration_s = len(data) / fs
+    N = len(p_detrend)
+    max_period = min((duration_s / 60.0) / 0.75, 600)
+    
+    # Heatmap: short window for good time resolution (4096 samples = ~68min at 1Hz)
+    nperseg_hm = min(4096, N)
+    noverlap_hm = nperseg_hm * 3 // 4
+    f_hm, t_hm, Sxx_hm = spectrogram(p_detrend, fs, nperseg=nperseg_hm, noverlap=noverlap_hm)
+    valid_hm = f_hm > 0
+    f_valid = f_hm[valid_hm]
+    Sxx_valid_hm = Sxx_hm[valid_hm, :]
+    periods_min = (1.0 / f_valid) / 60.0
+    time_hours = t_hm / 3600.0
+    power_db = 10 * np.log10(np.maximum(Sxx_valid_hm, 1e-20))
+    
+    # Wave detection: long window + zero-padding for full-range dense spectrum
+    # Use N//2 window (max period resolution) + nfft=N*4 (dense bins)
+    nperseg_det = min(N // 2, N)
+    nfft_det = N * 4
+    noverlap_det = nperseg_det * 3 // 4
+    f_det, t_det, Sxx_det = spectrogram(p_detrend, fs, nperseg=nperseg_det,
+                                         noverlap=noverlap_det, nfft=nfft_det)
+    valid_det = f_det > 0
+    p_det = (1.0 / f_det[valid_det]) / 60.0
+    mean_det = np.mean(Sxx_det[valid_det, :], axis=1)
+    
+    # Sort ascending
+    sort_idx = np.argsort(p_det)
+    p_det = p_det[sort_idx]
+    mean_det = mean_det[sort_idx]
+    
+    waves = _find_spectral_peaks(p_det, mean_det,
+                                  min_period=10, max_period=max_period,
+                                  prominence_ratio=0.03)
+    
+    return {
+        'method': 'STFT',
+        'waves': waves,
+        'periods': p_det,
+        'power': mean_det,
+        'ylabel': 'Mean Power (time-averaged)',
+        'spectrogram': {
+            'time_hours': time_hours,
+            'periods_min': periods_min,
+            'power_db': power_db
+        }
+    }
+
+
+def detect_waves_cwt(df_base, fs=1.0):
+    """
+    Method 4: Continuous Wavelet Transform (Morlet).
+    """
+    import pywt
+    data = df_base['Pressure (hPa)'].values
+    p_detrend = _detrend_linear(data, fs)
+    
+    duration_s = len(data) / fs
+    max_period = min((duration_s / 60.0) / 0.75, 600)
+    
+    # Define scales corresponding to periods from 10m to max_period
+    # Morlet wavelet: period = (1/f) and scale = fs / (2*pi*f * center_freq)
+    # For Morlet (cmor1.5-1.0), center_freq ~ 1.0
+    min_period_s = 10 * 60   # 10 minutes in seconds
+    max_period_s = max_period * 60
+    
+    # Create 100 logarithmically spaced scales
+    n_scales = 100
+    periods_s = np.logspace(np.log10(min_period_s), np.log10(max_period_s), n_scales)
+    
+    # Downsample if data is too long (CWT is O(N*scales))
+    max_samples = 8000
+    if len(p_detrend) > max_samples:
+        step = len(p_detrend) // max_samples
+        p_ds = p_detrend[::step]
+        fs_ds = fs / step
+    else:
+        p_ds = p_detrend
+        fs_ds = fs
+    
+    # Convert periods to scales for the morl wavelet
+    # For morl: scale = period * fs / (2*pi * 0.8125)  (approximate central frequency)
+    central_freq = pywt.central_frequency('morl')
+    scales = (central_freq * fs_ds) / (1.0 / periods_s)
+    
+    # Compute CWT
+    coefficients, frequencies = pywt.cwt(p_ds, scales, 'morl', sampling_period=1.0/fs_ds)
+    
+    # Power = |coefficients|^2
+    cwt_power = np.abs(coefficients) ** 2
+    
+    periods_min = periods_s / 60.0
+    time_s_arr = np.arange(len(p_ds)) / fs_ds
+    time_hours = time_s_arr / 3600.0
+    
+    # Time-averaged power for peak detection
+    mean_power = np.mean(cwt_power, axis=1)
+    
+    waves = _find_spectral_peaks(periods_min, mean_power,
+                                  min_period=10, max_period=max_period,
+                                  prominence_ratio=0.05)
+    
+    # Scalogram in dB for plotting
+    cwt_db = 10 * np.log10(np.maximum(cwt_power, 1e-20))
+    
+    return {
+        'method': 'CWT',
+        'waves': waves,
+        'periods': periods_min,
+        'power': mean_power,
+        'ylabel': 'CWT Mean Power',
+        'scalogram': {
+            'time_hours': time_hours,
+            'periods_min': periods_min,
+            'power_db': cwt_db
+        }
+    }
+
+
+def detect_waves_hht(df_base, fs=1.0):
+    """
+    Method 5: Hilbert-Huang Transform (EMD + Hilbert).
+    Decomposes signal into Intrinsic Mode Functions (IMFs), then computes
+    instantaneous frequency and amplitude of each.
+    """
+    from PyEMD import EMD
+    from scipy.signal import hilbert
+    
+    data = df_base['Pressure (hPa)'].values
+    p_detrend = _detrend_linear(data, fs)
+    
+    duration_s = len(data) / fs
+    max_period = min((duration_s / 60.0) / 0.75, 600)
+    
+    # Downsample for EMD speed
+    max_samples = 5000
+    if len(p_detrend) > max_samples:
+        step = len(p_detrend) // max_samples
+        p_ds = p_detrend[::step]
+        fs_ds = fs / step
+    else:
+        p_ds = p_detrend
+        fs_ds = fs
+    
+    # EMD decomposition
+    emd = EMD()
+    emd.MAX_ITERATION = 100
+    try:
+        IMFs = emd.emd(p_ds)
+    except Exception:
+        # EMD can fail on very short or flat data
+        return {
+            'method': 'HHT/EMD',
+            'waves': [],
+            'imfs': [],
+            'ylabel': 'IMF Amplitude'
+        }
+    
+    # Analyze each IMF
+    imf_results = []
+    waves = []
+    time_hours = np.arange(len(p_ds)) / fs_ds / 3600.0
+    
+    for i, imf in enumerate(IMFs):
+        # Skip the residual (last IMF) if it's just a trend
+        if i == len(IMFs) - 1 and len(IMFs) > 2:
+            continue
+            
+        # Hilbert transform for instantaneous frequency
+        analytic = hilbert(imf)
+        inst_amp = np.abs(analytic)
+        inst_phase = np.unwrap(np.angle(analytic))
+        
+        # Instantaneous frequency (Hz)
+        inst_freq = np.diff(inst_phase) / (2.0 * np.pi * (1.0 / fs_ds))
+        inst_freq = np.clip(inst_freq, 1e-10, fs_ds / 2)
+        
+        # Dominant period of this IMF (median of instantaneous period)
+        inst_period_min = (1.0 / inst_freq) / 60.0
+        median_period = float(np.median(inst_period_min))
+        mean_amp = float(np.mean(inst_amp))
+        
+        imf_results.append({
+            'imf_index': i,
+            'signal': imf,
+            'time_hours': time_hours,
+            'median_period_min': median_period,
+            'mean_amplitude': mean_amp
+        })
+        
+        # Only count as a detected wave if within our range
+        if 10 <= median_period <= max_period:
+            waves.append({
+                'period_min': median_period,
+                'amplitude': mean_amp,
+                'power': mean_amp ** 2,
+                'imf_index': i
+            })
+    
+    waves.sort(key=lambda x: x['power'], reverse=True)
+    
+    return {
+        'method': 'HHT/EMD',
+        'waves': waves[:8],
+        'imfs': imf_results,
+        'ylabel': 'IMF Amplitude'
+    }
+
+
+def compute_wave_consensus(method_results, tolerance=0.20):
+    """
+    Multi-method consensus voting.
+    Groups detected waves across methods by matching periods within ±tolerance.
+    Returns a list of consensus entries sorted by agreement count.
+    """
+    # Collect all detected periods from all methods
+    all_detections = []
+    for result in method_results:
+        method = result['method']
+        for w in result['waves']:
+            all_detections.append({
+                'method': method,
+                'period': w['period_min'],
+                'amplitude': w.get('amplitude', 0),
+                'power': w.get('power', 0)
+            })
+    
+    if not all_detections:
+        return []
+    
+    # Sort by period
+    all_detections.sort(key=lambda x: x['period'])
+    
+    # Group detections within ±tolerance of each other
+    groups = []
+    used = set()
+    
+    for i, det in enumerate(all_detections):
+        if i in used:
+            continue
+        group = [det]
+        used.add(i)
+        
+        for j in range(i + 1, len(all_detections)):
+            if j in used:
+                continue
+            # Check if within tolerance AND from a different method
+            ratio = abs(det['period'] - all_detections[j]['period']) / det['period']
+            methods_in_group = {d['method'] for d in group}
+            if ratio <= tolerance and all_detections[j]['method'] not in methods_in_group:
+                group.append(all_detections[j])
+                used.add(j)
+        
+        groups.append(group)
+    
+    # Build consensus entries
+    consensus = []
+    for group in groups:
+        methods = [d['method'] for d in group]
+        periods = [d['period'] for d in group]
+        amplitudes = [d['amplitude'] for d in group]
+        
+        n_methods = len(methods)
+        avg_period = float(np.mean(periods))
+        avg_amp = float(np.mean(amplitudes))
+        
+        if n_methods >= 5:
+            confidence = 'Confirmed'
+            icon = '🟢'
+        elif n_methods >= 4:
+            confidence = 'Strong'
+            icon = '🔵'
+        elif n_methods >= 3:
+            confidence = 'Likely'
+            icon = '🟡'
+        elif n_methods >= 2:
+            confidence = 'Weak'
+            icon = '🟠'
+        else:
+            confidence = 'Uncertain'
+            icon = '⚪'
+        
+        consensus.append({
+            'period_min': avg_period,
+            'amplitude': avg_amp,
+            'n_methods': n_methods,
+            'methods': methods,
+            'confidence': confidence,
+            'icon': icon
+        })
+    
+    # Sort by number of methods confirming (desc), then by period (asc)
+    consensus.sort(key=lambda x: (-x['n_methods'], x['period_min']))
+    
+    return consensus
+
+
 def permutation_entropy(time_series, m=3, delay=1):
     """
     Calculate the Permutation Entropy
