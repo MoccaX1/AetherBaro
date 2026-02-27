@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.17] - 2026-02-27
+### Features
+- feat: improve wave period marker styling in Plotly charts. ([#66d30be](https://github.com/user/repo/commit/66d30bee3a05a9bbc43fff5d7058dd853c20ea15))
+
 ## [1.1.16] - 2026-02-27
 ### Features
 - feat: Add wave signal (P - Synoptic) plot, make CWT and HHT/EMD wave analysis optional ([#1ec3240](https://github.com/user/repo/commit/1ec324074f38daca0a733e77a292b611209ac183))
