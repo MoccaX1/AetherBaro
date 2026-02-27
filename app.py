@@ -391,6 +391,34 @@ def main():
             fig1_res.update_xaxes(title=None)
             st.plotly_chart(fig1_res, width="stretch")
             
+            # --- Pressure - Residual Pressure (Synoptic Only) = wave-only signal ---
+            # This is: raw pressure MINUS the slow synoptic component.
+            # Result = all short-period variations: waves + tides + turbulence.
+            df_l1_plot['Wave Signal (P - Synoptic)'] = df_l1_plot['Pressure (hPa)'] - df_l1_plot['Residual Pressure (Synoptic Only)']
+            y_wave = df_l1_plot['Wave Signal (P - Synoptic)']
+            y_wave_centered = y_wave - y_wave.mean()  # Center at 0 for clarity
+            
+            pos_w = np.where(y_wave_centered >= 0, y_wave_centered, 0)
+            neg_w = np.where(y_wave_centered < 0, y_wave_centered, 0)
+            
+            fig1_wave = go.Figure()
+            fig1_wave.add_trace(go.Scatter(x=df_l1_plot['Datetime'], y=pos_w, mode='lines',
+                                            line=dict(color='#00d4ff', width=1), fill='tozeroy', name='Dao dong (+)'))
+            fig1_wave.add_trace(go.Scatter(x=df_l1_plot['Datetime'], y=neg_w, mode='lines',
+                                            line=dict(color='#ff8c00', width=1), fill='tozeroy', name='Dao dong (-)'))
+            
+            amp_wave = float(y_wave_centered.max() - y_wave_centered.min()) / 2
+            fig1_wave.update_layout(
+                title=f"Tin hieu Song thuan (P - Synoptic) | Bien do max: ±{amp_wave:.4f} hPa",
+                template="plotly_dark", showlegend=True,
+                legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title="")
+            )
+            fig1_wave.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.4, annotation_text="Baseline")
+            fig1_wave.update_xaxes(title=None)
+            fig1_wave.update_yaxes(title="hPa (dao dong)")
+            st.plotly_chart(fig1_wave, width="stretch")
+            st.caption("P - Synoptic = tin hieu da loai bo xu huong ap suat tong quan (synoptic). Chi con lai song ngan, thuy trieu, va nhieu.")
+            
             fig2 = px.line(df_l1_plot, x='Datetime', y='dP/dt (hPa/hr)', title="Tốc độ biến thiên (dP/dt) (1 Phút Smoothed)", template="plotly_dark", render_mode="svg")
             fig2.update_traces(line_color='#00d4ff')
             fig2.update_xaxes(title=None)
@@ -429,14 +457,48 @@ def main():
             fft_max_period = max(300, max_band_period * 1.15)
             color_map = {'S3': 'cyan', 'S4': 'magenta', 'Boss': 'red', 'Mother': 'green', 'Child': 'blue', 'Micro': 'orange', 'Wildcard': 'purple'}
             
-            with st.spinner("Dang chay 5 phuong phap phan tich pho..."):
+            # --- Phase 1: Auto-run fast methods ---
+            with st.spinner("Dang chay FFT / PSD / STFT..."):
                 result_fft = detect_waves_fft(df_base, fs=fs)
                 result_psd = detect_waves_psd(df_base, fs=fs)
                 result_stft = detect_waves_stft(df_base, fs=fs)
-                result_cwt = detect_waves_cwt(df_base, fs=fs)
-                result_hht = detect_waves_hht(df_base, fs=fs)
-                all_results = [result_fft, result_psd, result_stft, result_cwt, result_hht]
-                consensus = compute_wave_consensus(all_results)
+            
+            # --- Phase 2: Optional heavy methods ---
+            _EMPTY = {'method': '', 'waves': [], 'periods': np.array([]), 'power': np.array([])}
+            
+            st.divider()
+            col_cwt_opt, col_hht_opt = st.columns(2)
+            run_cwt = col_cwt_opt.checkbox(
+                "Chay CWT (Wavelet) — ~30 giay",
+                value=False,
+                help="CWT su dung Morlet Wavelet voi downsampling. Mat nhieu thoi gian hon voi file lon."
+            )
+            run_hht = col_hht_opt.checkbox(
+                "Chay HHT/EMD — ~60 giay",
+                value=False,
+                help="EMD phan tach tin hieu thanh IMF. Rat cham voi du lieu > 50,000 mau."
+            )
+            
+            if run_cwt:
+                with st.spinner("Dang chay CWT (Wavelet Morlet)... co the mat 30-60 giay"):
+                    result_cwt = detect_waves_cwt(df_base, fs=fs)
+            else:
+                result_cwt = dict(_EMPTY, method='CWT')
+            
+            if run_hht:
+                with st.spinner("Dang chay HHT/EMD... co the mat 60-120 giay"):
+                    result_hht = detect_waves_hht(df_base, fs=fs)
+            else:
+                result_hht = dict(_EMPTY, method='HHT/EMD')
+            
+            st.divider()
+            
+            # Build consensus from whatever methods ran
+            active_results = [result_fft, result_psd, result_stft]
+            if run_cwt: active_results.append(result_cwt)
+            if run_hht: active_results.append(result_hht)
+            n_active = len(active_results)
+            consensus = compute_wave_consensus(active_results)
             
             stab_con, stab_fft, stab_psd, stab_stft, stab_cwt, stab_hht = st.tabs(["Tong hop", "FFT", "PSD Welch", "STFT", "CWT", "HHT/EMD"])
             
@@ -548,13 +610,18 @@ def main():
             with stab_cwt:
                 st.subheader("Phuong phap 4: CWT (Continuous Wavelet Transform)")
                 st.caption("Wavelet Morlet: co gian cua so theo tan so.")
-                draw_spectrum(result_cwt, st)
-                draw_heatmap(result_cwt, st, "Scalogram")
+                if not run_cwt:
+                    st.info("⏸️ CWT chua duoc chay. Tich chon **'Chay CWT (Wavelet)'** o phia tren de kich hoat.", icon="🔬")
+                else:
+                    draw_spectrum(result_cwt, st)
+                    draw_heatmap(result_cwt, st, "Scalogram")
             
             with stab_hht:
                 st.subheader("Phuong phap 5: HHT/EMD (Hilbert-Huang Transform)")
                 st.caption("Phan tach song thanh IMF roi tinh tan so tuc thoi.")
-                if result_hht.get('imfs'):
+                if not run_hht:
+                    st.info("⏸️ HHT/EMD chua duoc chay. Tich chon **'Chay HHT/EMD'** o phia tren de kich hoat.", icon="🔬")
+                elif result_hht.get('imfs'):
                     for imf_d in result_hht['imfs'][:6]:
                         idx = imf_d['imf_index']; per = imf_d['median_period_min']; amp = imf_d['mean_amplitude']
                         fig_i = px.line(x=imf_d['time_hours'], y=imf_d['signal'], title=f"IMF {idx+1}: ~{per:.1f}min | ~{amp:.5f} hPa", template="plotly_dark", render_mode="svg")
