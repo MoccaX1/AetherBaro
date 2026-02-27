@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.18] - 2026-02-27
+- Minor updates and improvements.
+
 ## [1.1.17] - 2026-02-27
 ### Features
 - feat: improve wave period marker styling in Plotly charts. ([#66d30be](https://github.com/user/repo/commit/66d30bee3a05a9bbc43fff5d7058dd853c20ea15))
