@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.16] - 2026-02-27
+### Features
+- feat: Add wave signal (P - Synoptic) plot, make CWT and HHT/EMD wave analysis optional ([#1ec3240](https://github.com/user/repo/commit/1ec324074f38daca0a733e77a292b611209ac183))
+
 ## [1.1.15] - 2026-02-27
 ### Features
 - feat: Implement multi-method spectral analysis including FFT, PSD, STFT, CWT, and HHT for wave detection, along with new helper functions and diagnostic files. ([#6a6cbfd](https://github.com/user/repo/commit/6a6cbfd21d11ddd4232c326624481b515385919c))
