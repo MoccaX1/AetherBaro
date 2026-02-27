@@ -513,8 +513,16 @@ def main():
                 for i, w in enumerate(result['waves'][:6]):
                     p = w['period_min']
                     if 10 <= p <= fft_max_period:
-                        fig.add_vline(x=p, line_dash="dot", line_color="white", opacity=0.7)
-                        fig.add_annotation(x=p, y=1.0-i*0.08, yref="paper", text=f"{p:.1f}m", showarrow=True, arrowhead=2, font=dict(color="white", size=10))
+                        # Use amber/gold — readable on both dark and light Plotly themes
+                        fig.add_vline(x=p, line_dash="dash", line_color="#FFB300", opacity=0.85, line_width=1.5)
+                        fig.add_annotation(
+                            x=p, y=1.0-i*0.09, yref="paper",
+                            text=f"<b>{p:.1f}m</b>",
+                            showarrow=True, arrowhead=3, arrowwidth=1.5, arrowcolor="#FFB300",
+                            ax=18, ay=-20,
+                            font=dict(color="#FFB300", size=11),
+                            bgcolor="rgba(0,0,0,0.4)", bordercolor="#FFB300", borderwidth=1, borderpad=3
+                        )
                 fig.update_xaxes(title=None); fig.update_yaxes(title=result.get('ylabel','Power'))
                 ct.plotly_chart(fig, width="stretch")
                 
@@ -535,7 +543,11 @@ def main():
                 for w in result['waves'][:5]:
                     p = w['period_min']
                     if 10 <= p <= fft_max_period:
-                        fig.add_hline(y=p, line_dash='dash', line_color='white', opacity=0.5, annotation_text=f"{p:.0f}m", annotation_font_color='white')
+                        fig.add_hline(y=p, line_dash='dash', line_color='#FFB300', opacity=0.8,
+                                      line_width=1.5,
+                                      annotation_text=f"{p:.0f}m",
+                                      annotation_font_color='#FFB300',
+                                      annotation_bgcolor='rgba(0,0,0,0.4)')
                 
                 # Adaptive Y-axis: bound by actual data range (with small padding in log space)
                 # Use where the data actually has energy (above 10% percentile of dB)
