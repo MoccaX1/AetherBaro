@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.19] - 2026-03-01
+### Features
+- feat: Enhance wave scoring in `analysis.py` with an evidence-based system using calibrated amplitudes and period-dependent noise floors, supported by the new `verify_noise.py` script validating spectral detrending. ([#a595a3c](https://github.com/user/repo/commit/a595a3c142278258fda03007cc3746f60987066e))
+
 ## [1.1.18] - 2026-02-27
 - Minor updates and improvements.
 
