@@ -1,24 +1,39 @@
-# AetherBaro: High-Resolution Atmospheric Layering & Spectral Analyzer
+# AetherBaro: Advanced Atmospheric Layering & Spectral Analyzer
 
 🌍 **Live Demo:** [https://aetherbaro.streamlit.app/](https://aetherbaro.streamlit.app/)
 
-**AetherBaro** là một hệ thống phân tích áp suất khí quyển độ phân giải cao, được thiết kế để bóc tách các hiện tượng vật lý từ dữ liệu thô thông qua cấu trúc phân tích 5 lớp độc lập. Ứng dụng tự động tối ưu hóa dựa trên thông số phần cứng của thiết bị đo (như LG V60, Sony Xperia...) để mang lại độ chính xác cao nhất.
+**AetherBaro** là một hệ thống phân tích áp suất khí quyển độ phân giải siêu cao (raw data lên tới 32Hz). Ứng dụng là một "kính hiển vi" khảo sát các sóng trọng lực khí quyển (Atmospheric Gravity Waves) và nhiễu động nhiệt, giúp bóc tách các hiện tượng vật lý thông qua 5 lớp phân tích độc lập. Hệ thống tự động tối ưu hóa bù trừ nhiễu màng nhĩ phần cứng (Empirical Noise: Turbulence, Electronic Noise, VLF Drift) dựa trên cảm biến thiết bị đo (vd: Bosch BMP380, InvenSense).
 
-## 🚀 Tính năng chính (5 Lớp Vật lý)
+## 🚀 Tính năng nổi bật (Major Features)
 
-1.  **Lớp 1 (Synoptic & Tides):** Phân tích xu hướng quy mô lớn và thủy triều khí quyển (Mặt Trăng & Mặt Trời).
-2.  **Lớp 2 (Wave Spectrum):** Nhận diện động các dải sóng **Boss**, **Mother**, **Child** và **Micro** thông qua Zero-padded FFT.
-3.  **Lớp 3 (Atmosphere State):** Đo lường độ hỗn loạn khí quyển bằng **Permutation Entropy** và Rolling Variance.
-4.  **Lớp 4 (Micro-events):** Phát hiện các xung động áp suất cực ngắn (Gust Proxy) từ dữ liệu gốc 32Hz.
-5.  **Lớp 5 (Planetary Link):** Đối chiếu dữ liệu thực tế với các mỏ neo bên ngoài (External Anchors) và so sánh Baseline.
+### Lớp 1 (Synoptic & Fixed Bands Filter)
+* **Bộ lọc tuyến tính (Linear Bandpass Filters):** Cô lập năng lượng vào các "rọ" lý thuyết: **S3, S4, Boss, Mother, Child, Micro**.
+* **Trừ Dư số Synoptic (Residual / Wave-Only Fluctuation):** Bóc tách xu hướng áp suất chậm ra khỏi dao động sóng và nhiễu (áp suất dư 0 hPa).
+* **Phantom Waves Overlay (Tính năng X-Ray):** Hiển thị những con "Sóng Bóng ma" (Sóng vật lý phát hiện bởi Trọng tài Layer 2) lồng ghép đè lên dữ liệu đo thực tế, bóc trần cấu trúc thực sự của rọ lọc băng thông.
+* **Thời tiết Không gian:** Tích hợp phương trình thiên văn tính toán pha Mặt trăng, góc Cao độ Mặt trời và Thủy triều Khí quyển (Solar+Lunar Tides).
+
+### Lớp 2 (Multi-Method Wave Spectrum Analysis)
+Đây là cốt lõi của AetherBaro, khảo sát phổ tần số bằng 5 phương pháp Xử lý tín hiệu song song nhằm tránh thiên kiến toán học:
+1. **FFT (Fast Fourier Transform):** Zero-padded FFT, độ phân giải cao nhất, nhạy bén tuyệt đối với sóng ngắn.
+2. **PSD (Welch's Periodogram):** Loại bỏ nhiễu ngẫu nhiên bằng Gaussian Smoothing, bắt các đỉnh sóng bền vững.
+3. **STFT (Spectrogram Dual-Window):** Khảo sát thời gian - tần số. Đánh giá độ dai dẳng của sóng qua bản đồ nhiệt.
+4. **CWT (Continuous Wavelet Morlet):** Biến đổi Wavelet liên tục (Scalogram), khảo sát cực nhạy phân bố năng lượng theo thang đo Logarit của các sóng siêu dài (S3, Boss).
+5. **HHT/EMD (Hilbert-Huang):** Phân tích phi tuyến tính, đi tìm đường bao cực trị để bóc tách các Tần số Nội tại gốc (Intrinsic Mode Functions).
+
+### Lớp 3 (Trọng tài Consensus Thông minh)
+* **Smart Evidence-Based Scoring System (0-100/100):** Vượt qua hạn chế của việc đếm "số Vote" thông thường. Hệ thống chấm điểm dựa trên:
+  * **Chuyên môn thuật toán:** (VD: HHT/CWT uy tín đặc biệt cho sóng dài, FFT uy tín cho sóng ngắn).
+  * **Tỷ lệ Tín hiệu/Nhiễu (SNR) Thích ứng Phần cứng:** Sử dụng nền tảng nhiễu động học. Ngưỡng nhiễu Turbulence `(< 1m) là 0.0072 hPa`, nhiễu trôi nhiệt tĩnh VLF `(> 160m) là 0.1656 hPa`.
+  * **Sàng lọc tự động:** Chấm điểm `Confirmed 🟢`, `Likely 🟡`, `Weak 🟠`, `Uncertain ⚪`. Những sóng bị điểm liệt (ảo ảnh toán học, rò rỉ phổ) sẽ tự động bị loại.
+
+### Lớp 4 & 5 (Atmosphere State & Micro-events)
+* **Permutation Entropy:** Đo lường độ hỗn loạn khí quyển, Kolmogorov Global Spectral Slope. Nhận diện sự bất ổn định trước dông lốc.
 
 ## 🛠 Công nghệ sử dụng
 
-*   **Ngôn ngữ:** Python 3.10+
-*   **Giao diện:** Streamlit (Dark Mode Optimized)
-*   **Đồ họa:** Plotly (Interactive & Dynamic Decimation)
-*   **Xử lý tín hiệu:** NumPy, SciPy (Butterworth SOS Filters, Gaussian Order-1 Derivatives)
-*   **Thiên văn:** Astral (Solar Elevation & Moon Phase calculations)
+* **Ngôn ngữ:** Python 3.10+
+* **Hệ sinh thái:** Streamlit (Dark Mode Optimized), Plotly (Interactive Heatmaps)
+* **Toán học & Tín hiệu:** SciPy, NumPy, PyWavelets (CWT), EMD-signal (HHT)
 
 ## 📁 Cấu trúc dữ liệu yêu cầu
 
@@ -26,32 +41,21 @@ Dữ liệu đầu vào cần được đặt trong thư mục `data/` với c�
 ```text
 data/
 └── Pressure_YYYYMMDD_HHMM/
-    ├── Pressure.csv (Dữ liệu 32Hz thô)
+    ├── Pressure.csv (Dữ liệu 32Hz ngõ vào)
     └── meta/
-        ├── device.csv (Thông số cảm biến từ NSX)
-        ├── time.csv (Thời gian bắt đầu/kết thúc)
-        └── location.csv (Tọa độ GPS để tính thủy triều)
+        ├── device.csv (Thông số phần cứng, Hardware noise tolerance)
+        ├── time.csv 
+        └── location.csv (Tọa độ GPS)
 ```
 
 ## 💻 Hướng dẫn cài đặt
 
-1.  **Cài đặt thư viện:**
-    ```bash
-    pip install -r requirements.txt
-    ```
+```bash
+# Cài đặt thư viện:
+pip install -r requirements.txt
 
-2.  **Chạy ứng dụng:**
-    ```bash
-    run.bat
-    # Hoặc chạy lệnh trực tiếp:
-    streamlit run app.py
-    ```
-
-## 🔋 Khả năng tương thích thiết bị
-
-Hệ thống tự động đọc file `device.csv` để:
-*   **Điều chỉnh sai số (Tolerance):** Tự động nhận diện độ phân giải cảm biến (ví dụ: 0.01 hPa cho LG V60).
-*   **Giới hạn tần số (Nyquist):** Tự động giới hạn tần số phân tích tối đa dựa trên `MinDelay` của phần cứng.
+# Khởi chạy:
+streamlit run app.py
+```
 
 ---
-*Phát triển bởi Antigravity AI Code Team.*
