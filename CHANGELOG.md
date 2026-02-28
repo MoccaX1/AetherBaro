@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.21] - 2026-03-01
+### Bug Fixes
+- fix: optimize CWT performance in analysis.py. ([#5ffcab0](https://github.com/user/repo/commit/5ffcab0337c637869f03a117808da5184add0078))
+
+### Documentation
+- docs: update README. ([#a702a4a](https://github.com/user/repo/commit/a702a4a61ac8a07c782243edbefc4470e42e46d4))
+
 ## [1.1.20] - 2026-03-01
 ### Features
 - feat: Introduce diagnostic scripts for wave detection and spectral noise analysis, including detrending method verification. ([#cabaff9](https://github.com/user/repo/commit/cabaff9aee89b4d059439c000ae9410b5d8fdd05))
