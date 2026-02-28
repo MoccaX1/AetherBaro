@@ -469,24 +469,24 @@ def main():
             st.divider()
             col_cwt_opt, col_hht_opt = st.columns(2)
             run_cwt = col_cwt_opt.checkbox(
-                "Chay CWT (Wavelet) — ~30 giay",
-                value=False,
-                help="CWT su dung Morlet Wavelet voi downsampling. Mat nhieu thoi gian hon voi file lon."
+                "Chay CWT (Wavelet)",
+                value=True,
+                help="CWT su dung Morlet Wavelet voi downsampling."
             )
             run_hht = col_hht_opt.checkbox(
-                "Chay HHT/EMD — ~60 giay",
-                value=False,
-                help="EMD phan tach tin hieu thanh IMF. Rat cham voi du lieu > 50,000 mau."
+                "Chay HHT/EMD",
+                value=True,
+                help="EMD phan tach tin hieu thanh IMF."
             )
             
             if run_cwt:
-                with st.spinner("Dang chay CWT (Wavelet Morlet)... co the mat 30-60 giay"):
+                with st.spinner("Dang chay CWT (Wavelet Morlet)..."):
                     result_cwt = detect_waves_cwt(df_base, fs=fs)
             else:
                 result_cwt = dict(_EMPTY, method='CWT')
             
             if run_hht:
-                with st.spinner("Dang chay HHT/EMD... co the mat 60-120 giay"):
+                with st.spinner("Dang chay HHT/EMD..."):
                     result_hht = detect_waves_hht(df_base, fs=fs)
             else:
                 result_hht = dict(_EMPTY, method='HHT/EMD')
@@ -572,9 +572,20 @@ def main():
             with stab_con:
                 st.subheader("Bieu quyet Da so (5 Phuong phap)")
                 if consensus:
-                    st.dataframe(pd.DataFrame([{"": c['icon'], "Chu ky (min)": f"{c['period_min']:.1f}", "Bien do TB": f"{c['amplitude']:.5f}", "Xac nhan": f"{c['n_methods']}/5", "Tin cay": c['confidence'], "Cac PP": ", ".join(c['methods'])} for c in consensus]), width="stretch")
-                n_conf = sum(1 for c in consensus if c['n_methods'] >= 3)
-                st.metric("Song xac nhan (>=3/5 PP)", f"{n_conf}/{len(consensus)}")
+                    df_c = pd.DataFrame([{
+                        "Phan loai": w['icon'],
+                        "Chu ky (min)": f"{w['period_min']:.1f}",
+                        "Bien do (hPa)": f"{w['amplitude']:.5f}",
+                        "SNR": f"{w['snr']:.1f}x",
+                        "Diem (Score)": f"{w['score']:.0f}/100",
+                        "Tin cay": w['confidence'],
+                        "Cac PP Xac nhan": ", ".join(w['methods'])
+                    } for w in consensus])
+                    st.dataframe(df_c, width="stretch")
+                    st.caption("Score duoc tinh dua tren do phu hop cua phuong phap voi dải sóng va SNR so voi nhieu phan cung (0.0072 - 0.1656 hPa).")
+                
+                n_conf = sum(1 for c in consensus if c.get('score', 0) >= 60)
+                st.metric("Song xac nhan (Score >= 60)", f"{n_conf}/{len(consensus)}")
                 st.markdown(f"**Do tin cay (NSX: {tol:.4f} hPa | San nhieu: {dynamic_noise_floor:.5f} hPa)**")
                 wr = []
                 for name, sig in filtered_signals.items():

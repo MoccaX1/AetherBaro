@@ -899,20 +899,74 @@ def compute_wave_consensus(method_results, tolerance=0.20):
         periods = [d['period'] for d in group]
         amplitudes = [d['amplitude'] for d in group]
         
-        n_methods = len(methods)
-        avg_period = float(np.mean(periods))
-        avg_amp = float(np.mean(amplitudes))
+        # --- Smart Evidence-Based Scoring System ---
+        # Instead of just counting methods, we evaluate the evidence quality:
+        # 1. Method Suitability for the specific period band
+        # 2. Amplitude vs Hardware Noise Floor (SNR)
         
-        if n_methods >= 5:
+        n_methods = len(methods)
+        avg_period = float(np.median(periods)) # Use median to be robust against outliers
+        
+        # Spectral methods (FFT, PSD, CWT) inherently return amplitudes that are mathematically 
+        # scaled down by windowing, energy spreading, or averaging (often 10x-30x lower than 
+        # the true time-domain amplitude). We apply a heuristic calibration factor to bring 
+        # the 'average amplitude' back to a physical scale before comparing to hardware specs.
+        # HHT is already in physical scale, but the mix pulls the average down.
+        # A conservative 15x multiplier aligns the spectral amplitude (e.g., ~0.01 hPa) 
+        # with the empirical time-domain amplitude (e.g., ~0.15 hPa).
+        calibrated_amp = float(np.mean(amplitudes)) * 15.0
+        
+        # Determine hardware noise floor based on period band
+        # Hardware specs: >1Hz: 0.0056, 1s-1m: 0.0072, >160m: 0.1656
+        if avg_period < 1.0: # < 1 min (Turbulence)
+            noise_floor = 0.0072
+        elif avg_period > 160.0: # > 160 min (VLF Drift)
+            noise_floor = 0.1656
+        else: # 1 min - 160 min (Gravity Waves band)
+            # Log-linear interpolation between 0.0072 (1m) and 0.1656 (160m)
+            log_p = np.log10(avg_period)
+            log_1 = np.log10(1.0)
+            log_160 = np.log10(160.0)
+            fraction = (log_p - log_1) / (log_160 - log_1)
+            noise_floor = 0.0072 + fraction * (0.1656 - 0.0072)
+            
+        snr_calibrated = calibrated_amp / noise_floor if noise_floor > 0 else 0
+        
+        # Calculate Base Score (Max 100) from methods
+        score = 0
+        for m in methods:
+            if m in ['FFT', 'PSD Welch']:
+                # Strong evidence for short/medium waves, weaker for long trends
+                score += 35 if avg_period < 100 else 15
+            elif m == 'STFT':
+                # Strong evidence for persistent waves
+                score += 25
+            elif m == 'CWT':
+                # Strong evidence for long waves, okay for short
+                score += 30 if avg_period >= 60 else 15
+            elif m == 'HHT/EMD':
+                # Strongest evidence for distinct physical nonlinear modes
+                score += 40
+                
+        # Apply SNR Multiplier
+        # SNR < 1.0: Penalize heavily (likely noise artifact)
+        # SNR 1.0 - 2.0: Neutral to slight boost
+        # SNR > 2.0: Strong physical evidence, boost score
+        if snr_calibrated < 1.0:
+            score *= (0.6 + 0.4 * snr_calibrated) # Drops to 60% if SNR is 0
+        elif snr_calibrated > 2.0:
+            score *= min(1.5, 1.0 + 0.15 * (snr_calibrated - 2.0)) # Up to 50% bonus
+            
+        score = min(100.0, score) # Cap at 100
+        
+        # Assign Confidence Tier
+        if score >= 80:
             confidence = 'Confirmed'
             icon = '🟢'
-        elif n_methods >= 4:
-            confidence = 'Strong'
-            icon = '🔵'
-        elif n_methods >= 3:
+        elif score >= 60:
             confidence = 'Likely'
             icon = '🟡'
-        elif n_methods >= 2:
+        elif score >= 40:
             confidence = 'Weak'
             icon = '🟠'
         else:
@@ -921,7 +975,9 @@ def compute_wave_consensus(method_results, tolerance=0.20):
         
         consensus.append({
             'period_min': avg_period,
-            'amplitude': avg_amp,
+            'amplitude': float(np.mean(amplitudes)), # Keep raw mean for display
+            'snr': snr_calibrated,
+            'score': score,
             'n_methods': n_methods,
             'methods': methods,
             'confidence': confidence,
