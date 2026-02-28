@@ -703,14 +703,15 @@ def detect_waves_cwt(df_base, fs=1.0):
     min_period_s = 10 * 60   # 10 minutes in seconds
     max_period_s = max_period * 60
     
-    # Create 100 logarithmically spaced scales
-    n_scales = 100
+    # Create 80 logarithmically spaced scales (optimized for speed vs resolution)
+    n_scales = 80
     periods_s = np.logspace(np.log10(min_period_s), np.log10(max_period_s), n_scales)
     
-    # Downsample if data is too long (CWT is O(N*scales))
-    max_samples = 8000
+    # Downsample aggressively for CWT speed: max 4000 samples
+    # CWT FFT method is O(N log N * scales), so keeping N small is key for Streamlit Cloud
+    max_samples = 4000
     if len(p_detrend) > max_samples:
-        step = len(p_detrend) // max_samples
+        step = max(1, len(p_detrend) // max_samples)
         p_ds = p_detrend[::step]
         fs_ds = fs / step
     else:
@@ -718,12 +719,12 @@ def detect_waves_cwt(df_base, fs=1.0):
         fs_ds = fs
     
     # Convert periods to scales for the morl wavelet
-    # For morl: scale = period * fs / (2*pi * 0.8125)  (approximate central frequency)
     central_freq = pywt.central_frequency('morl')
     scales = (central_freq * fs_ds) / (1.0 / periods_s)
     
-    # Compute CWT
-    coefficients, frequencies = pywt.cwt(p_ds, scales, 'morl', sampling_period=1.0/fs_ds)
+    # Compute CWT using the much faster FFT method instead of time-domain convolution
+    # This prevents the Streamlit Cloud timeout issue
+    coefficients, frequencies = pywt.cwt(p_ds, scales, 'morl', sampling_period=1.0/fs_ds, method='fft')
     
     # Power = |coefficients|^2
     cwt_power = np.abs(coefficients) ** 2
