@@ -596,8 +596,32 @@ def main():
                     except: pv=0
                     wr.append({"Lop": ("🌫️ " if pv>total_duration_mins else "")+name.split(' ')[0], "T(m)": ps, "Amp": f"{amp:.4f}", "SNR_NSX": f"{snr_t:.1f}x", "SNR_Emp": f"{snr_e:.1f}x", "": gs(snr_e)})
                 st.dataframe(pd.DataFrame(wr), width="stretch")
-                fig_c = px.line(df_waves_plot, x='Datetime', y=list(filtered_signals.keys()), title="Tat ca Dai Song Ket Hop", template="plotly_dark", render_mode="svg")
+                fig_c = px.line(df_waves_plot, x='Datetime', y=list(filtered_signals.keys()), title="Tat ca Dai Song Ket Hop + Song Thuc te (Phantom)", template="plotly_dark", render_mode="svg")
                 fig_c.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
+                for tr in fig_c.data:
+                    tr.line.width = 2
+                    if '(' in tr.name:
+                        ps = tr.name.split('(')[1].replace('m)','')
+                        try: pv=float(ps)
+                        except: pv=0
+                        if pv>total_duration_mins: tr.line.dash='dot'; tr.opacity=0.3
+                
+                # Overlay Phantom Waves
+                import scipy.signal
+                t_arr = np.arange(len(df_waves_plot)) * (1.0 / fs if fs <= 1.0 else plot_step / fs)
+                for c in consensus:
+                    if c.get('score', 0) >= 60:
+                        p_min = c['period_min']
+                        amp = c['amplitude']
+                        omega = 2 * np.pi / (p_min * 60)
+                        phantom_sig = amp * np.sin(omega * t_arr)
+                        fig_c.add_scatter(
+                            x=df_waves_plot['Datetime'], y=phantom_sig, mode='lines',
+                            name=f"👻 {p_min:.1f}m (Score:{c.get('score',0):.0f})",
+                            line=dict(color='#FFB300', width=2, dash='dashdot'),
+                            opacity=0.8
+                        )
+                
                 draw_tide_blocks(fig_c, l1_max_blocks, None, '#ff4b4b', 'Pmax', 'top'); draw_tide_blocks(fig_c, l1_min_blocks, None, '#00d4ff', 'Pmin', 'top')
                 fig_c.update_xaxes(title=None); st.plotly_chart(fig_c, width="stretch")
             
@@ -605,8 +629,10 @@ def main():
                 st.subheader("Phuong phap 1: FFT (Fast Fourier Transform)")
                 st.caption("Zero-padded FFT. Do nhay cao nhat, nhung cung nhieu 'gai' nhieu nhat.")
                 draw_spectrum(result_fft, st)
-                # Usability chart
-                fig_u = px.line(df_waves_plot, x='Datetime', y=list(filtered_signals.keys()), title="Bieu do Kha dung (Da loc San Nhieu)", template="plotly_dark", render_mode="svg")
+                # Usability chart with Phantom Waves overlay
+                fig_u = px.line(df_waves_plot, x='Datetime', y=list(filtered_signals.keys()), title="Bieu do Kha dung (Da loc San Nhieu) + Song Thuc te (Phantom)", template="plotly_dark", render_mode="svg")
+                
+                # 1. Plot Theoretical fixed-band waves (Solid)
                 for tr in fig_u.data:
                     s = filtered_signals[tr.name]; a = (s.max()-s.min())/2
                     ps = tr.name.split('(')[1].replace('m)','') if '(' in tr.name else '0'
@@ -614,6 +640,26 @@ def main():
                     except: pv=0
                     if pv>total_duration_mins or a<dynamic_noise_floor: tr.line.dash='dot'; tr.opacity=0.3
                     else: tr.line.width=2; tr.opacity=1.0
+                    
+                # 2. Overlay Phantom Waves from Consensus (Dashed Amber)
+                import scipy.signal
+                t_arr = np.arange(len(df_waves_plot)) * (1.0 / fs if fs <= 1.0 else plot_step / fs)
+                for c in consensus:
+                    if c.get('score', 0) >= 60:
+                        p_min = c['period_min']
+                        amp = c['amplitude']
+                        # Generate ideal sine wave for this period and amplitude
+                        # We don't have exact phase, so we just plot the envelope/ideal wave for visualization 
+                        # To make it align roughly with data, we use zero phase at start
+                        omega = 2 * np.pi / (p_min * 60)
+                        phantom_sig = amp * np.sin(omega * t_arr)
+                        fig_u.add_scatter(
+                            x=df_waves_plot['Datetime'], y=phantom_sig, mode='lines',
+                            name=f"👻 {p_min:.1f}m (Score:{c.get('score',0):.0f})",
+                            line=dict(color='#FFB300', width=2, dash='dashdot'),
+                            opacity=0.8
+                        )
+                
                 fig_u.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""))
                 fig_u.add_hline(y=dynamic_noise_floor, line_dash="dash", line_color="rgba(255,255,255,0.5)", annotation_text="+ San Nhieu")
                 fig_u.add_hline(y=-dynamic_noise_floor, line_dash="dash", line_color="rgba(255,255,255,0.5)", annotation_text="- San Nhieu")
