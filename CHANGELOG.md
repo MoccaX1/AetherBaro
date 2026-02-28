@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.20] - 2026-03-01
+### Features
+- feat: Introduce diagnostic scripts for wave detection and spectral noise analysis, including detrending method verification. ([#cabaff9](https://github.com/user/repo/commit/cabaff9aee89b4d059439c000ae9410b5d8fdd05))
+
 ## [1.1.19] - 2026-03-01
 ### Features
 - feat: Enhance wave scoring in `analysis.py` with an evidence-based system using calibrated amplitudes and period-dependent noise floors, supported by the new `verify_noise.py` script validating spectral detrending. ([#a595a3c](https://github.com/user/repo/commit/a595a3c142278258fda03007cc3746f60987066e))
