@@ -482,7 +482,50 @@ def analyze_layer_2(df_base, fs=1.0):
                 'base_name': 'Wildcard'
             }
             wildcard_count += 1
+            
+    # --- DEDUPLICATION LOGIC ---
+    # Fix the issue where a massive wave exactly on a boundary (e.g. 30.6m) 
+    # triggers both 'Micro' (10-30) and 'Child' (30-60).
+    bands_list = []
+    for k, v in dynamic_bands.items():
+        # Find power of this peak to decide which overlapping band wins
+        # (closest index to the peak period)
+        idx = np.abs(periods_min - v['peak']).argmin()
+        peak_power = power_valid[idx] if idx < len(power_valid) else 0
+        bands_list.append((k, v, peak_power))
+        
+    # Sort by period 
+    bands_list.sort(key=lambda x: x[1]['peak'])
     
+    dedup_bands = {}
+    skip_next = False
+    
+    for i in range(len(bands_list)):
+        if skip_next:
+            skip_next = False
+            continue
+            
+        k1, v1, pwr1 = bands_list[i]
+        
+        if i < len(bands_list) - 1:
+            k2, v2, pwr2 = bands_list[i+1]
+            
+            # If peak periods are within 15% of each other, they are the same physical wave
+            # leaking across two adjacent theoretical bandpass filters
+            ratio = abs(v1['peak'] - v2['peak']) / max(v1['peak'], 1e-5)
+            if ratio < 0.15:
+                # Keep the one with higher spectral power (closer to the true center)
+                if pwr1 >= pwr2:
+                    dedup_bands[k1] = v1
+                else:
+                    dedup_bands[k2] = v2
+                skip_next = True
+                continue
+                
+        dedup_bands[k1] = v1
+        
+    dynamic_bands = dedup_bands
+
     # 3. Filter the signals using the newly discovered dynamic bands
     filtered_signals = {}
     for label, info in dynamic_bands.items():
