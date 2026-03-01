@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.22] - 2026-03-01
+### Features
+- feat: Add wave band deduplication logic to prevent overlap and introduce diagnostic scripts for wave detection and noise analysis verification. ([#ca4118a](https://github.com/user/repo/commit/ca4118aa5e312bad69b995f1580ff31c5b4f98e1))
+
 ## [1.1.21] - 2026-03-01
 ### Bug Fixes
 - fix: optimize CWT performance in analysis.py. ([#5ffcab0](https://github.com/user/repo/commit/5ffcab0337c637869f03a117808da5184add0078))
